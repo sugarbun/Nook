@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  ContentView.swift
 //  Nook
@@ -8,6 +9,7 @@
 
 import SwiftUI
 import AppKit
+import NookWeb
 
 struct ContentView: View {
     @EnvironmentObject var browserManager: BrowserManager
@@ -33,8 +35,6 @@ struct ContentView: View {
             .background(WindowFocusBridge(windowState: windowState, windowRegistry: windowRegistry))
             .frame(minWidth: 470, minHeight: 382)
             .onAppear {
-                // Set TabManager reference for computed properties
-                windowState.tabManager = browserManager.tabManager
                 // Set CommandPalette reference for global shortcuts
                 windowState.commandPalette = commandPalette
                 // Register this window state with the registry
@@ -64,9 +64,9 @@ private struct WindowFocusBridge: NSViewRepresentable {
     }
     
     func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async {
-            context.coordinator.attach(to: nsView.window)
-        }
+        // Window is available at update time — call synchronously.
+        // The attach method guards against re-attachment to the same window.
+        context.coordinator.attach(to: nsView.window)
     }
     
     static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
@@ -78,6 +78,7 @@ private struct WindowFocusBridge: NSViewRepresentable {
         let windowRegistry: WindowRegistry
         private weak var window: NSWindow?
         private var keyObserver: Any?
+        private var closeObserver: Any?
 
         init(windowState: BrowserWindowState, windowRegistry: WindowRegistry) {
             self.windowState = windowState
@@ -90,6 +91,12 @@ private struct WindowFocusBridge: NSViewRepresentable {
             self.window = window
             guard let window else { return }
 
+            // Store NSWindow reference on the window state so other systems
+            // (e.g. KeyboardShortcutManager) can identify browser windows
+            Task { @MainActor in
+                windowState.window = window
+            }
+
             keyObserver = NotificationCenter.default.addObserver(
                 forName: NSWindow.didBecomeKeyNotification,
                 object: window,
@@ -98,6 +105,19 @@ private struct WindowFocusBridge: NSViewRepresentable {
                 guard let self else { return }
                 Task { @MainActor in
                     self.windowRegistry.setActive(self.windowState)
+                }
+            }
+
+            // onDisappear does not fire for windows Nook creates itself (they outlive close),
+            // so a closed window would stay registered and reopen on the next launch.
+            closeObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.willCloseNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                guard let self else { return }
+                MainActor.assumeIsolated {
+                    self.windowRegistry.unregister(self.windowState.id)
                 }
             }
 
@@ -112,6 +132,10 @@ private struct WindowFocusBridge: NSViewRepresentable {
             if let observer = keyObserver {
                 NotificationCenter.default.removeObserver(observer)
                 keyObserver = nil
+            }
+            if let observer = closeObserver {
+                NotificationCenter.default.removeObserver(observer)
+                closeObserver = nil
             }
             window = nil
         }

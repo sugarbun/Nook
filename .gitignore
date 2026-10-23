@@ -6,7 +6,6 @@ sessions-config.json
 Nook/.claude
 .crush
 /sessions
-CLAUDE.md
 AGENTS.md
 .xcodebuildmcp/
 package.json
@@ -17,7 +16,7 @@ package-lock.json
 xcuserdata/
 
 # Xcode nonsense
-# *.pbxproj
+ *.pbxproj
 # macOS garbage
 .DS_Store
 
@@ -113,3 +112,32 @@ DerivedData/
 *.xcresult
 *.log
 *.profraw
+.superpowers/
+
+# Certificates
+*.p12
+*.cer
+*.certSigningRequest
+*.pem
+*.key
+*.mobileprovision
+.env
+.env.*
+.worktrees
+
+# repowise index
+.repowise/
+
+# Rust FFI build output
+Nook/ThirdParty/AdblockRustFFI/target/
+build-release/
+build-release-signed/
+
+# Everything under docs/ stays local: designs, specs, reviews, handoffs, working
+# notes. adblocker-architecture.md is the one committed doc, referenced by CLAUDE.md.
+docs/*
+!docs/adblocker-architecture.md
+tasks/
+.superpowers/
+.playwright-mcp/
+build-ios/

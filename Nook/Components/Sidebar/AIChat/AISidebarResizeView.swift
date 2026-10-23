@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  AISidebarResizeView.swift
 //  Nook
@@ -6,6 +7,9 @@
 //
 
 import SwiftUI
+import NookDesign
+import NookWeb
+import NookUI
 
 struct AISidebarResizeView: View {
     @EnvironmentObject var browserManager: BrowserManager
@@ -36,13 +40,13 @@ struct AISidebarResizeView: View {
     var body: some View {
         ZStack {
             if isHovering || isResizing {
-                RoundedRectangle(cornerRadius: 1)
+                NookDesign.Radius.shape(NookDesign.Radius.xs)
                     .fill(Color.accentColor)
                     .frame(width: 2)
                     .frame(maxHeight: .infinity)
                     .offset(x: indicatorOffset)
-                    .animation(.easeInOut(duration: 0.15), value: isResizing)
-                    .animation(.easeInOut(duration: 0.15), value: isHovering)
+                    .animation(NookDesign.Motion.quick, value: isResizing)
+                    .animation(NookDesign.Motion.quick, value: isHovering)
                     .padding(.vertical, 30)
             }
 
@@ -52,7 +56,7 @@ struct AISidebarResizeView: View {
                 .padding(.vertical, 30)
                 .offset(x: hitAreaOffset)
                 .contentShape(.interaction, .rect)
-                .onHover { hovering in
+                .onHoverTracking { hovering in
                     guard windowState.isSidebarAIChatVisible else { return }
 
                     isHovering = hovering
@@ -70,7 +74,6 @@ struct AISidebarResizeView: View {
 
                             if !isResizing {
                                 guard dragLockManager.startDrag(ownerID: dragSessionID) else {
-                                    print("🚫 [AISidebarResizeView] Resize drag blocked - \(dragLockManager.debugInfo)")
                                     return
                                 }
 

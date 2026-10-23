@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  OllamaProvider.swift
 //  Nook
@@ -6,6 +7,7 @@
 //
 
 import Foundation
+import NookSettings
 import OSLog
 
 struct OllamaProvider: AIProviderProtocol {

@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  CacheManager.swift
 //  Nook
@@ -8,6 +9,7 @@
 import Foundation
 import WebKit
 import SwiftUI
+import NookWeb
 
 @MainActor
 class CacheManager: ObservableObject {
@@ -31,7 +33,6 @@ class CacheManager: ObservableObject {
         self.currentProfileId = profileId
         self.cacheEntries = []
         self.domainGroups = []
-        print("🔁 [CacheManager] Switched data store -> profile: \(profileId?.uuidString ?? "nil"), persistent: \(newDataStore.isPersistent)")
         if eagerLoad {
             Task { await self.loadCacheData() }
         }
@@ -177,7 +178,7 @@ class CacheManager: ObservableObject {
         await loadCacheData() // Refresh the list
         
         // Also clear favicon cache
-        Tab.clearFaviconCache()
+        FaviconCache.shared.clear()
     }
     
     func clearSpecificCache(_ cache: CacheInfo) async {
@@ -195,14 +196,12 @@ class CacheManager: ObservableObject {
     func clearFaviconCache() {
         // Favicon cache is global by design (shared across profiles for better reuse)
         // Only diagnostics include the current profile context.
-        print("🧹 [CacheManager] Clearing favicon cache for profile=\(currentProfileId?.uuidString ?? "nil") [global cache]")
-        Tab.clearFaviconCache()
+        FaviconCache.shared.clear()
     }
     
     func getFaviconCacheStats() -> (count: Int, domains: [String]) {
-        let stats = Tab.getFaviconCacheStats()
-        print("📊 [CacheManager] Favicon cache stats for profile=\(currentProfileId?.uuidString ?? "nil"): count=\(stats.count)")
-        return stats
+        let domains = FaviconCache.shared.memoryKeys
+        return (domains.count, domains)
     }
     
     func searchCache(_ query: String) -> [CacheInfo] {
@@ -258,7 +257,6 @@ class CacheManager: ObservableObject {
             memorySize: memorySize,
             staleCount: staleCount
         )
-        print("📊 [CacheManager] Stats for profile=\(currentProfileId?.uuidString ?? "nil"): total=\(stats.total), size=\(stats.totalSize), disk=\(stats.diskSize), mem=\(stats.memorySize), stale=\(stats.staleCount)")
         return stats
     }
     
@@ -270,7 +268,6 @@ class CacheManager: ObservableObject {
                 breakdown[type, default: 0] += cache.size
             }
         }
-        print("📊 [CacheManager] Type breakdown computed for profile=\(currentProfileId?.uuidString ?? "nil")")
         return breakdown
     }
     
@@ -315,7 +312,6 @@ extension CacheManager {
             let data = try encoder.encode(cacheEntries)
             return String(data: data, encoding: .utf8) ?? ""
         } catch {
-            print("Error exporting cache data: \(error)")
             return ""
         }
     }

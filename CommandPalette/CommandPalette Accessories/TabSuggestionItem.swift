@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  TabSuggestionItem.swift
 //  Nook
@@ -6,58 +7,58 @@
 //
 
 import SwiftUI
+import NookDesign
+import NookWeb
+import NookUI
 
 struct TabSuggestionItem: View {
-    let tab: Tab
+    let tab: SearchManager.TabMatch
     var isSelected: Bool = false
     
     @State private var isHovered: Bool = false
-    @Environment(\.colorScheme) var colorScheme
     @EnvironmentObject var gradientColorManager: GradientColorManager
-    
+
     var body: some View {
-        let isDark = colorScheme == .dark
-        
         HStack(alignment: .center, spacing: 0) {
             HStack(spacing: 9) {
                 ZStack {
                     tab.favicon
                         .resizable()
                         .scaledToFit()
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(.secondary)
                         .frame(width: 14, height: 14)
                 }
                 .frame(width: 24, height: 24)
-                .background(isSelected ? .white : .clear)
+                .background(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(NookDesign.Surface.fill))
                 .clipShape(
-                    RoundedRectangle(cornerRadius: 4)
+                    NookDesign.Radius.shape(NookDesign.Radius.xs)
                 )
-                Text(tab.name)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(isSelected ? .white : isDark ? .white.opacity(0.6) : .black.opacity(0.8))
+                Text(tab.title)
+                    .font(NookDesign.Font.label)
+                    .foregroundStyle(isSelected ? .white : .primary)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
             Spacer()
             HStack(spacing: 10) {
                 Text("Switch to Tab")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(isSelected ? .white : isDark ? .white.opacity(0.3) : .black.opacity(0.3))
+                    .font(NookDesign.Font.secondary)
+                    .foregroundStyle(isSelected ? .white : .secondary)
                 ZStack {
                     Image(systemName: "arrow.right")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(isSelected ? gradientColorManager.primaryColor : isDark ? .white.opacity(0.5) : .black.opacity(0.5))
+                        .font(NookDesign.Font.label)
+                        .foregroundStyle(isSelected ? gradientColorManager.accentColor : .secondary)
                         .frame(width: 16, height: 16)
                 }
                 .frame(width: 24, height: 24)
-                .background(isSelected ? .white : isDark ? .white.opacity(0.05) : .black.opacity(0.05))
-                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .background(isSelected ? .white : NookDesign.Surface.fill)
+                .clipShape(NookDesign.Radius.shape(NookDesign.Radius.xs))
 
             }
         }
         .frame(maxWidth: .infinity)
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.15)) {
+        .onHoverTracking { hovering in
+            withAnimation(NookDesign.Motion.quick) {
                 isHovered = hovering
             }
         }

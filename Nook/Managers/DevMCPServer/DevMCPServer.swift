@@ -1,0 +1,581 @@
+// Licensed under GPL-3.0. See LICENSE.
+//
+//  DevMCPServer.swift
+//  Nook
+//
+//  Debug-only MCP server so a coding agent can drive the running app during development.
+//  Streamable HTTP (JSON responses only) on 127.0.0.1, bearer token from a 0600 file.
+//
+//  claude mcp add --transport http nook http://127.0.0.1:47823/mcp \
+//    --header "Authorization: Bearer $(cat ~/Library/Application\ Support/com.gstudios.nook/dev-mcp-token)"
+//
+
+import AppKit
+import Foundation
+import Network
+import OSLog
+import WebKit
+import NookBlocker
+import NookWeb
+
+@MainActor
+final class DevMCPServer {
+    static let shared = DevMCPServer()
+    /// `-NookDevMCPPort 47900` moves the server so a second copy can run beside the installed app.
+    static let port: NWEndpoint.Port = {
+        let arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        let override = (arguments["NookDevMCPPort"] as? String).flatMap { UInt16($0) }
+        return override.flatMap { NWEndpoint.Port(rawValue: $0) } ?? 47823
+    }()
+
+    nonisolated private static let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Nook", category: "DevMCP")
+    nonisolated private static let maxBody = 8 * 1024 * 1024
+    nonisolated private static let toolTimeout: Double = 30
+
+    private weak var browserManager: BrowserManager?
+    private var listener: NWListener?
+    private var token = ""
+    private let queue = DispatchQueue(label: "com.gstudios.nook.devmcp")
+
+    /// Remember the browser and start only if the user has turned the server on.
+    /// Off is the default: see NookSettingsService.browserControlServerEnabled.
+    func configure(browserManager: BrowserManager, enabled: Bool) {
+        self.browserManager = browserManager
+        applyEnabledSetting(enabled)
+    }
+
+    /// Called when the setting changes, so the server starts and stops without a relaunch.
+    func applyEnabledSetting(_ enabled: Bool) {
+        guard enabled else { stop(); return }
+        guard let browserManager else { return }   // configure() has not run yet
+        start(browserManager: browserManager)
+    }
+
+    func stop() {
+        guard listener != nil else { return }
+        listener?.cancel()
+        listener = nil
+        Self.log.notice("listener stopped")
+    }
+
+    func start(browserManager: BrowserManager) {
+        guard listener == nil else { return }
+        self.browserManager = browserManager
+        do {
+            token = try Self.loadOrCreateToken()
+            let params = NWParameters.tcp
+            params.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: Self.port)
+            params.allowLocalEndpointReuse = true
+            let listener = try NWListener(using: params)
+            listener.newConnectionHandler = { [weak self] conn in
+                Task { @MainActor in self?.accept(conn) }
+            }
+            listener.stateUpdateHandler = { state in
+                Self.log.notice("listener \(String(describing: state), privacy: .public)")
+            }
+            listener.start(queue: queue)
+            self.listener = listener
+            installConsoleCapture()
+        } catch {
+            Self.log.error("start failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private static func loadOrCreateToken() throws -> String {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(Bundle.main.bundleIdentifier ?? "Nook", isDirectory: true)
+        let file = dir.appendingPathComponent("dev-mcp-token")
+        if let existing = try? String(contentsOf: file, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
+           existing.count >= 32 {
+            return existing
+        }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let fresh = UUID().uuidString + UUID().uuidString
+        try Data(fresh.utf8).write(to: file, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        return fresh
+    }
+
+    // MARK: - HTTP
+
+    private func accept(_ conn: NWConnection) {
+        conn.start(queue: queue)
+        receive(conn, buffer: Data())
+    }
+
+    private nonisolated func receive(_ conn: NWConnection, buffer: Data) {
+        conn.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, isComplete, error in
+            guard let self else { conn.cancel(); return }
+            var buffer = buffer
+            if let data { buffer.append(data) }
+            if let request = HTTPRequest(buffer) {
+                Task { @MainActor in
+                    let (status, body) = await self.handle(request)
+                    self.send(conn, status: status, body: body)
+                }
+            } else if error != nil || isComplete || buffer.count > Self.maxBody {
+                conn.cancel()
+            } else {
+                self.receive(conn, buffer: buffer)
+            }
+        }
+    }
+
+    private nonisolated func send(_ conn: NWConnection, status: Int, body: Data?) {
+        let reason = [200: "OK", 202: "Accepted", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 405: "Method Not Allowed"][status] ?? "Error"
+        var head = "HTTP/1.1 \(status) \(reason)\r\nConnection: close\r\nContent-Length: \(body?.count ?? 0)\r\n"
+        if body != nil { head += "Content-Type: application/json\r\n" }
+        var out = Data((head + "\r\n").utf8)
+        if let body { out.append(body) }
+        conn.send(content: out, completion: .contentProcessed { _ in conn.cancel() })
+    }
+
+    private func handle(_ req: HTTPRequest) async -> (Int, Data?) {
+        // Web pages cannot reach us: they would send an Origin, and could not know the token.
+        // Compare the parsed host, not a string prefix: http://localhost.attacker.example passed.
+        if let origin = req.headers["origin"] {
+            let host = URL(string: origin)?.host
+            guard host == "127.0.0.1" || host == "localhost" || host == "::1" else { return (403, nil) }
+        }
+        guard req.headers["authorization"] == "Bearer \(token)" else { return (401, nil) }
+        guard req.path.hasPrefix("/mcp") else { return (404, nil) }
+        switch req.method {
+        case "POST": break
+        case "DELETE": return (200, nil)
+        default: return (405, nil)
+        }
+        guard let msg = try? JSONSerialization.jsonObject(with: req.body) as? [String: Any] else {
+            return (400, rpcError(id: NSNull(), code: -32700, message: "Parse error"))
+        }
+        guard let id = msg["id"] else { return (202, nil) } // notification
+        let method = msg["method"] as? String ?? ""
+        let params = msg["params"] as? [String: Any] ?? [:]
+
+        let result: [String: Any]
+        switch method {
+        case "initialize":
+            result = [
+                "protocolVersion": params["protocolVersion"] as? String ?? "2025-06-18",
+                "capabilities": ["tools": [:] as [String: Any]],
+                "serverInfo": ["name": "nook-dev", "version": "1"],
+                "instructions": "Drives the running Debug build of Nook. Page tools act on the selected tab of the active window."
+            ]
+        case "ping":
+            result = [:]
+        case "tools/list":
+            result = ["tools": Self.toolList]
+        case "tools/call":
+            let name = params["name"] as? String ?? ""
+            let args = params["arguments"] as? [String: Any] ?? [:]
+            guard let called = await withTimeout(Self.toolTimeout, operation: { await self.callTool(name, args) }) else {
+                return (200, rpcError(id: id, code: -32001, message: "Tool \(name) did not answer within \(Int(Self.toolTimeout))s"))
+            }
+            result = called
+        default:
+            return (200, rpcError(id: id, code: -32601, message: "Method not found: \(method)"))
+        }
+        return (200, try? JSONSerialization.data(withJSONObject: ["jsonrpc": "2.0", "id": id, "result": result]))
+    }
+
+    /// A tool that never returns must not hold its connection open for ever, so
+    /// every call races a deadline and nil means the deadline won. The losing work
+    /// is cancelled but may not notice: `evaluateJavaScript` cannot be cancelled.
+    private func withTimeout<T: Sendable>(_ seconds: Double, operation: @escaping @MainActor () async -> T) async -> T? {
+        // Not a task group: a group waits for its children even after cancelAll(),
+        // so an abandoned evaluateJavaScript would still hold the connection open
+        // for as long as it took. These two tasks race and the loser is dropped.
+        let latch = Latch()
+        return await withCheckedContinuation { (cont: CheckedContinuation<T?, Never>) in
+            // The deadline task is made first so the work task can cancel it: a tool that
+            // answers in a millisecond otherwise leaves a sleeper on the main actor for the
+            // full timeout, one per request.
+            let deadline = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(seconds))
+                guard !latch.done else { return }
+                latch.done = true
+                latch.work?.cancel()
+                cont.resume(returning: nil)
+            }
+            latch.work = Task { @MainActor in
+                let value = await operation()
+                guard !latch.done else { return }
+                latch.done = true
+                deadline.cancel()
+                cont.resume(returning: value)
+            }
+        }
+    }
+
+    /// Whether the race above has already been decided, and the work task the deadline
+    /// branch cancels (assigned after the deadline task is made, so it is passed this way).
+    @MainActor private final class Latch {
+        var done = false
+        var work: Task<Void, Never>?
+    }
+
+    private func rpcError(id: Any, code: Int, message: String) -> Data? {
+        try? JSONSerialization.data(withJSONObject: ["jsonrpc": "2.0", "id": id, "error": ["code": code, "message": message]])
+    }
+
+    // MARK: - Tools
+
+    private static let devTools: [AIToolDefinition] = [
+        AIToolDefinition(
+            name: "evaluate",
+            description: "Run JavaScript as an async function body in the selected tab and return the JSON of its return value. Use `return` and `await` freely. world: 'page' (default) or 'isolated'.",
+            parameters: ["type": "object", "properties": [
+                "code": ["type": "string"],
+                "world": ["type": "string", "enum": ["page", "isolated"]]
+            ], "required": ["code"]]
+        ),
+        AIToolDefinition(
+            name: "screenshot",
+            description: "JPEG of the selected tab's visible page, at most maxWidth pixels wide (default 1200).",
+            parameters: ["type": "object", "properties": ["maxWidth": ["type": "integer"]]]
+        ),
+        AIToolDefinition(
+            name: "console",
+            description: "Console messages, uncaught errors and failed resource loads (a blocked script or image shows here) captured in the selected tab's main frame since its last load. Tabs loaded before the server started need a reload. clear: true empties the buffer after reading.",
+            parameters: ["type": "object", "properties": ["clear": ["type": "boolean"]]]
+        ),
+        AIToolDefinition(
+            name: "reload",
+            description: "Reload the selected tab and wait for the load to finish (timeout seconds, default 20, capped at 25 by the server's own deadline).",
+            parameters: ["type": "object", "properties": ["timeout": ["type": "number"]]]
+        ),
+        AIToolDefinition(
+            name: "wait_for_load",
+            description: "Wait until the selected tab stops loading (timeout seconds, default 20, capped at 25 by the server's own deadline). Call after navigateToURL.",
+            parameters: ["type": "object", "properties": ["timeout": ["type": "number"]]]
+        ),
+        AIToolDefinition(
+            name: "blocker_status",
+            description: "Content blocker state for the selected tab: enabled, whether this page is exempt, allowlisted host, compiled rule lists.",
+            parameters: ["type": "object", "properties": [:] as [String: Any]]
+        ),
+        AIToolDefinition(
+            name: "set_blocking",
+            description: "Turn ad blocking on or off for the selected tab's host (edits the persisted allowlist) and reload.",
+            parameters: ["type": "object", "properties": ["enabled": ["type": "boolean"]], "required": ["enabled"]]
+        ),
+        AIToolDefinition(
+            name: "check_urls",
+            description: "Ask adblock-rust whether each URL would be blocked when requested from sourceURL (default: the selected tab's URL). type is an adblock request type: script, image, stylesheet, xmlhttprequest, sub_frame, media, font, ping, other.",
+            parameters: ["type": "object", "properties": [
+                "urls": ["type": "array", "items": ["type": "string"]],
+                "type": ["type": "string"],
+                "sourceURL": ["type": "string"]
+            ], "required": ["urls"]]
+        ),
+        AIToolDefinition(
+            name: "closeTabs",
+            description: "Close tabs in the active window. indices: positions from getTabList. Or regular: true to delete every tab and folder in the active space's regular tabs section, leaving favorites and pinned tabs.",
+            parameters: ["type": "object", "properties": [
+                "indices": ["type": "array", "items": ["type": "integer"]],
+                "regular": ["type": "boolean"]
+            ]]
+        ),
+        AIToolDefinition(
+            name: "pinTab",
+            description: "Pin the tab at a getTabList index to the active space's pinned section.",
+            parameters: ["type": "object", "properties": ["index": ["type": "integer"]], "required": ["index"]]
+        ),
+        AIToolDefinition(
+            name: "user_scripts",
+            description: "User scripts installed in the selected tab: first line, injection time, main frame only, length.",
+            parameters: ["type": "object", "properties": [:] as [String: Any]]
+        ),
+        AIToolDefinition(
+            name: "pages",
+            description: "Every live page in every window: url, WebContent pid, loaded, on screen, in a window, document.visibilityState.",
+            parameters: ["type": "object", "properties": [:] as [String: Any]]
+        ),
+        AIToolDefinition(
+            name: "clear_page_cache",
+            description: "Drop the back/forward page cache of every live page that is not on screen (hidden: false for all). Returns how many views were cleared.",
+            parameters: ["type": "object", "properties": ["all": ["type": "boolean"]]]
+        )
+    ]
+
+    /// `executeJavaScript` is not advertised: over this server it is only an old name for
+    /// `evaluate` (see callTool), and the chat's description of it is wrong for that behaviour.
+    /// The alias stays so an agent registered against the old name keeps working.
+    private static let toolList: [[String: Any]] = (BrowserTools.allTools.filter { $0.name != "executeJavaScript" } + devTools).map {
+        ["name": $0.name, "description": $0.description, "inputSchema": $0.parameters]
+    }
+
+    private var window: BrowserWindowState? {
+        guard let registry = browserManager?.windowRegistry else { return nil }
+        return registry.activeWindow ?? registry.windows.values.first
+    }
+
+    private var session: PageSession? {
+        guard let bm = browserManager, let window else { return nil }
+        return bm.tabs.controllableSession(in: window)
+    }
+
+    private var webView: WKWebView? {
+        guard let bm = browserManager, let window, let id = window.selectedItemID else { return nil }
+        return bm.getWebView(for: id, in: window.id) ?? session?.webView
+    }
+
+    private func text(_ s: String, error: Bool = false) -> [String: Any] {
+        ["content": [["type": "text", "text": s]], "isError": error]
+    }
+
+    private func json(_ value: Any) -> String {
+        guard JSONSerialization.isValidJSONObject(value),
+              let data = try? JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys]) else {
+            return String(describing: value)
+        }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// The server does not enforce the advertised schemas, and `intValue` would turn 1.9 into tab 1.
+    private static func wholeNumber(_ number: NSNumber) -> Int? {
+        let value = number.doubleValue
+        return value == value.rounded() && abs(value) < 1e9 ? Int(value) : nil
+    }
+
+    private func callTool(_ rawName: String, _ args: [String: Any]) async -> [String: Any] {
+        guard let bm = browserManager, let window else { return text("No browser window", error: true) }
+
+        // The chat's executeJavaScript evaluates an expression, so `return` (which
+        // every agent writes) is a syntax error. Here it is another name for
+        // `evaluate`, which runs the code as an async function body.
+        let name = rawName == "executeJavaScript" ? "evaluate" : rawName
+
+        do {
+            if BrowserTools.toolsByName[name] != nil {
+                let executor = BrowserToolExecutor(browserManager: bm, windowState: window)
+                let r = try await executor.execute(AIToolCall(name: name, arguments: args))
+                return text(r.content, error: r.isError)
+            }
+
+            switch name {
+            case "evaluate":
+                guard let wv = webView else { return text("No active tab", error: true) }
+                let code = args["code"] as? String ?? ""
+                let world: WKContentWorld = args["world"] as? String == "isolated" ? .defaultClient : .page
+                // Serialize in the page so DOM nodes, undefined and cycles come back readable.
+                let wrapped = """
+                const __v = await (async () => { \(code)
+                })();
+                if (__v === undefined) return 'undefined';
+                try { const s = JSON.stringify(__v, null, 2); return s === undefined ? String(__v) : s; }
+                catch (e) { return String(__v); }
+                """
+                let result = try await wv.callAsyncJavaScript(wrapped, contentWorld: world)
+                return text(result as? String ?? String(describing: result))
+
+            case "screenshot":
+                guard let wv = webView else { return text("No active tab", error: true) }
+                let maxWidth = (args["maxWidth"] as? NSNumber)?.doubleValue ?? 1200
+                let config = WKSnapshotConfiguration()
+                // snapshotWidth is in points; the image comes back at the backing scale.
+                let scale = wv.window?.backingScaleFactor ?? 2
+                config.snapshotWidth = NSNumber(value: min(wv.bounds.width, maxWidth / scale))
+                let image = try await wv.takeSnapshot(configuration: config)
+                guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+                      let jpeg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.7]) else {
+                    return text("Snapshot encoding failed", error: true)
+                }
+                return ["content": [["type": "image", "data": jpeg.base64EncodedString(), "mimeType": "image/jpeg"]]]
+
+            case "console":
+                guard let wv = webView else { return text("No active tab", error: true) }
+                let clear = args["clear"] as? Bool == true
+                let result = try await wv.callAsyncJavaScript(
+                    "const b = globalThis.__nookDevConsole; if (!b) return null; const out = JSON.stringify(b, null, 1); if (clear) b.length = 0; return out;",
+                    arguments: ["clear": clear], contentWorld: .page
+                )
+                return text(result as? String ?? "No capture in this page. Reload it (the capture script installs at document start).")
+
+            case "reload", "wait_for_load":
+                guard let wv = webView else { return text("No active tab", error: true) }
+                if name == "reload" { wv.reload() }
+                // Clamped below the outer deadline: an uncapped timeout: 60 would be cut off
+                // by withTimeout at 30s as a confusing -32001 instead of this tool's own answer.
+                let timeout = min((args["timeout"] as? NSNumber)?.doubleValue ?? 20, Self.toolTimeout - 5)
+                let deadline = Date().addingTimeInterval(timeout)
+                // ponytail: 100 ms poll, debug-only and bounded by the timeout; use navigation delegate callbacks if this ever matters.
+                if name == "reload" { try await Task.sleep(for: .milliseconds(150)) }
+                while wv.isLoading, Date() < deadline { try await Task.sleep(for: .milliseconds(100)) }
+                return text(wv.isLoading ? "Still loading after \(timeout)s: \(wv.url?.absoluteString ?? "")" : "Loaded: \(wv.url?.absoluteString ?? "") | \(wv.title ?? "")", error: wv.isLoading)
+
+            case "blocker_status":
+                let cb = bm.contentBlockerManager
+                let host = webView?.url?.host
+                var status: [String: Any] = [
+                    "enabled": cb.isEnabled,
+                    "compiling": cb.isCompiling,
+                    "hostAllowlisted": cb.isDomainAllowed(host),
+                    "host": host ?? ""
+                ]
+                if let s = session {
+                    status["blockingApplied"] = cb.shouldApplyBlocking(to: s)
+                    status["oauthFlow"] = s.isOAuthFlow
+                    status["temporarilyDisabled"] = cb.isTemporarilyDisabled(tabId: s.itemID)
+                }
+                return text(json(status))
+
+            case "set_blocking":
+                guard let host = webView?.url?.host else { return text("Selected tab has no host", error: true) }
+                let enabled = args["enabled"] as? Bool ?? true
+                bm.contentBlockerManager.allowDomain(host, allowed: !enabled)
+                return text("Blocking \(enabled ? "on" : "off") for \(host); reloading. Call wait_for_load next.")
+
+            case "check_urls":
+                let engine = bm.contentBlockerManager.advancedRulesEngine.engine
+                let urls = args["urls"] as? [String] ?? []
+                let type = args["type"] as? String ?? "script"
+                let source = args["sourceURL"] as? String ?? webView?.url?.absoluteString ?? ""
+                var out: [String: Bool] = [:]
+                for url in urls {
+                    out[url] = engine.matches(url: url, sourceURL: source, type: type)
+                }
+                return text(json(out))
+
+            case "closeTabs":
+                if args["regular"] as? Bool == true {
+                    guard let spaceID = window.spaceID else { return text("Window has no space", error: true) }
+                    let roots = bm.tabs.children(of: .tabs(spaceID: spaceID))
+                    for item in roots { bm.tabs.remove(item.id) }
+                    return text("Removed \(roots.count) items from the regular tabs section")
+                }
+                let order = bm.tabs.displayOrder(in: window)
+                let indices = (args["indices"] as? [NSNumber] ?? []).compactMap(Self.wholeNumber)
+                guard !indices.isEmpty, indices.count == (args["indices"] as? [Any])?.count,
+                      indices.allSatisfy(order.indices.contains) else {
+                    return text("indices must be positions from getTabList (0-\(order.count - 1))", error: true)
+                }
+                bm.tabs.close(indices.map { order[$0] })
+                return text("Closed \(indices.count) tabs")
+
+            case "pinTab":
+                let order = bm.tabs.displayOrder(in: window)
+                guard let index = (args["index"] as? NSNumber).flatMap(Self.wholeNumber), order.indices.contains(index),
+                      let spaceID = window.spaceID else { return text("index must be a position from getTabList", error: true) }
+                bm.tabs.pin(order[index], to: .pinned(spaceID: spaceID))
+                return text("Pinned: \(bm.tabs.item(order[index])?.displayTitle ?? "")")
+
+            case "user_scripts":
+                guard let wv = webView else { return text("No active tab", error: true) }
+                let scripts = wv.configuration.userContentController.userScripts.map { s -> [String: Any] in
+                    let first = s.source.prefix(while: { $0 != "\n" }).prefix(120)
+                    return [
+                        "firstLine": String(first),
+                        "atStart": s.injectionTime == .atDocumentStart,
+                        "mainFrameOnly": s.isForMainFrameOnly,
+                        "length": s.source.count
+                    ]
+                }
+                return text(json(scripts))
+
+            case "pages":
+                var pages: [[String: Any]] = []
+                for page in bm.tabs.sessions {
+                    var entry: [String: Any] = [
+                        "url": page.url.absoluteString,
+                        "loaded": !page.isUnloaded,
+                        "onScreen": bm.tabs.isOnScreen(page.itemID)
+                    ]
+                    if let wv = page.webView {
+                        entry["pid"] = wv.nookWebProcessIdentifier
+                        entry["inWindow"] = wv.window != nil
+                        entry["visibility"] = (try? await wv.evaluateJavaScript("document.visibilityState")) as? String ?? ""
+                    }
+                    pages.append(entry)
+                }
+                return text(json(pages))
+
+            case "clear_page_cache":
+                let all = args["all"] as? Bool ?? false
+                let views = bm.tabs.sessions.filter { !$0.isUnloaded && (all || !bm.tabs.isOnScreen($0.itemID)) }
+                views.forEach { $0.clearPageCache() }
+                return text("Cleared \(views.count)")
+
+            default:
+                return text("Unknown tool: \(name)", error: true)
+            }
+        } catch {
+            return text("\(name) failed: \(error.localizedDescription)", error: true)
+        }
+    }
+
+    // MARK: - Console capture
+
+    /// Buffers console output, uncaught errors and failed resource loads for the `console` tool.
+    /// Added to the shared configuration, so it reaches tabs created (or reloaded) after start.
+    private func installConsoleCapture() {
+        let source = """
+        // Nook Dev MCP console capture
+        (function () {
+          if (globalThis.__nookDevConsole) return;
+          const buf = globalThis.__nookDevConsole = [];
+          const MAX = 500;
+          const push = (e) => { e.t = Math.round(performance.now()); buf.push(e); if (buf.length > MAX) buf.shift(); };
+          const fmt = (a) => { try { return typeof a === 'string' ? a : (a instanceof Error ? a.stack || String(a) : JSON.stringify(a)); } catch (_) { return String(a); } };
+          for (const level of ['log', 'info', 'warn', 'error', 'debug']) {
+            const orig = console[level];
+            console[level] = function (...args) {
+              try { push({ level, msg: args.map(fmt).join(' ').slice(0, 2000) }); } catch (_) {}
+              return orig.apply(this, args);
+            };
+          }
+          addEventListener('error', (ev) => {
+            const el = ev.target;
+            if (el && el !== window && el.tagName) {
+              push({ level: 'loadError', tag: el.tagName.toLowerCase(), url: el.src || el.href || el.currentSrc || '' });
+            } else {
+              push({ level: 'uncaught', msg: String(ev.message), at: (ev.filename || '') + ':' + ev.lineno });
+            }
+          }, true);
+          addEventListener('unhandledrejection', (ev) => push({ level: 'unhandledRejection', msg: fmt(ev.reason).slice(0, 2000) }));
+        })();
+        """
+        let script = WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page)
+        BrowserConfiguration.shared.webViewConfiguration.userContentController.addUserScript(script)
+    }
+}
+
+// MARK: - Minimal HTTP/1.1 request parsing
+
+private struct HTTPRequest {
+    let method: String
+    let path: String
+    let headers: [String: String]
+    let body: Data
+
+    /// Nil until the buffer holds the full head and a Content-Length body.
+    init?(_ buffer: Data) {
+        guard let split = buffer.range(of: Data("\r\n\r\n".utf8)),
+              let head = String(data: buffer[..<split.lowerBound], encoding: .utf8) else { return nil }
+        let lines = head.components(separatedBy: "\r\n")
+        let start = lines[0].split(separator: " ")
+        guard start.count >= 2 else { return nil }
+        var headers: [String: String] = [:]
+        for line in lines.dropFirst() {
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            headers[line[..<colon].lowercased()] = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+        }
+        // A negative length would build an inverted range below and trap before the token check.
+        let length = max(0, Int(headers["content-length"] ?? "0") ?? 0)
+        let bodyStart = split.upperBound
+        guard buffer.count - bodyStart >= length else { return nil }
+        method = String(start[0])
+        path = String(start[1])
+        self.headers = headers
+        body = buffer.subdata(in: bodyStart..<(bodyStart + length))
+    }
+}
+
+private extension WKWebView {
+    /// `_webProcessIdentifier`: the pid of the WebContent process behind this view, 0 when it has none.
+    var nookWebProcessIdentifier: Int32 {
+        let selector = NSSelectorFromString("_webProcessIdentifier")
+        guard responds(to: selector) else { return 0 }
+        typealias Getter = @convention(c) (AnyObject, Selector) -> Int32
+        return unsafeBitCast(method(for: selector), to: Getter.self)(self, selector)
+    }
+}

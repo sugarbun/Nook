@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 import AppKit
 import Foundation
 //
@@ -7,12 +8,6 @@ import Foundation
 //  Created by Maciek Bagiński on 31/07/2025.
 //
 import SwiftUI
-
-func zoomCurrentWindow() {
-    if let window = NSApp.keyWindow {
-        window.zoom(nil)
-    }
-}
 
 extension View {
     public func backgroundDraggable() -> some View {
@@ -55,8 +50,6 @@ private struct ConditionalWindowDragModifier: ViewModifier {
                                     window.performDrag(with: NSApp.currentEvent!)
                                 }
                             }
-                        } else {
-                            print("🚫 [ConditionalWindowDrag] Blocked - \(dragLockManager.debugInfo)")
                         }
                     }
                     .onEnded { value in
@@ -81,12 +74,7 @@ struct WindowDragGesture: Gesture {
                         if let window = NSApp.keyWindow {
                             window.performDrag(with: NSApp.currentEvent!)
                         }
-                    } else {
-                        print("🚫 [WindowDragGesture] Failed to acquire universal drag lock")
                     }
-                } else {
-                    // Window drag is blocked by another active drag
-                    print("🚫 [WindowDragGesture] Window drag blocked - \(dragLockManager.debugInfo)")
                 }
             }
             .onEnded { value in

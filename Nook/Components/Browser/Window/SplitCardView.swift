@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  SplitCardView.swift
 //  Nook
@@ -6,7 +7,7 @@
 //
 
 import SwiftUI
-import Combine
+import NookDesign
 
 struct SplitCardView: View {
     var icon: String
@@ -22,10 +23,10 @@ struct SplitCardView: View {
         ZStack {
             VStack(spacing: 12) {
                 Image(systemName: icon)
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(NookDesign.Font.heading)
                     .foregroundStyle(currentTextColor)
                 Text(text)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(NookDesign.Font.secondary)
                     .lineLimit(1)
                     .multilineTextAlignment(.center)
                     .foregroundStyle(currentTextColor)
@@ -33,20 +34,17 @@ struct SplitCardView: View {
             }
             .opacity(0.6)
             
-            RoundedRectangle(cornerRadius: 14)
+            NookDesign.Radius.shape(NookDesign.Radius.lg)
                 .strokeBorder(currentTextColor, style: StrokeStyle(lineWidth: 2, dash: [7,10]))
                 .opacity(0.3)
         }
         .frame(width: 237, height: 394)
         .padding(8)
         .background(
-            BlurEffectView(material: .hudWindow, state: .active)
-        )
-        .background(
             Color(currentTextColor)
                 .opacity(0.1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 24))
-        .animation(.easeInOut(duration: 0.2), value: currentTextColor)
+        .nookFloatingSurface(in: NookDesign.Radius.shape(NookDesign.Radius.lg))
+        .animation(NookDesign.Motion.standard, value: currentTextColor)
     }
 }

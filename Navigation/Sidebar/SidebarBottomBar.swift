@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  SidebarBottomBar.swift
 //  Nook
@@ -6,10 +7,15 @@
 //
 
 import SwiftUI
+import NookDesign
+import NookTabsCore
+import NookWeb
+import NookUI
 
 /// Bottom bar of the sidebar containing menu button, spaces list, and new space button
 struct SidebarBottomBar: View {
     @EnvironmentObject var browserManager: BrowserManager
+    @Environment(TabsController.self) private var tabs
     @Environment(BrowserWindowState.self) private var windowState
     @Binding var isMenuButtonHovered: Bool
     let onMenuTap: () -> Void
@@ -17,9 +23,9 @@ struct SidebarBottomBar: View {
     let onMenuHover: (Bool) -> Void
     
     var body: some View {
-        HStack(alignment: .bottom, spacing: 10) {
+        HStack(alignment: .center, spacing: NookDesign.Spacing.xxs) {
             menuButton
-            
+
             // Hide spaces list in incognito windows (only one ephemeral space)
             if !windowState.isIncognito {
                 SpacesList()
@@ -27,13 +33,14 @@ struct SidebarBottomBar: View {
                     .environmentObject(browserManager)
                     .environment(windowState)
             }
-            
+
             // Hide new space button in incognito windows
             if !windowState.isIncognito {
                 newSpaceButton
             }
-        }.fixedSize(horizontal: false, vertical: true)
-        .padding(.horizontal, 8)
+        }
+        .frame(height: NookDesign.Size.bottomBar)
+        .padding(.horizontal, NookDesign.Spacing.sidebarInset)
     }
     
     private var menuButton: some View {
@@ -41,16 +48,17 @@ struct SidebarBottomBar: View {
             Button("Menu", systemImage: "archivebox") {
                 onMenuTap()
             }
-            .labelStyle(.iconOnly)
-            .buttonStyle(NavButtonStyle())
-            .foregroundStyle(Color.primary)
-            .onHover { isHovered in
+            // A finished download bounces the button its icon flew into.
+            .symbolEffect(.bounce, value: browserManager.downloadManager.completedCount)
+            .nookIconButtons()
+            .anchorPreference(key: DownloadsButtonAnchorKey.self, value: .bounds) { $0 }
+            .onHoverTracking { isHovered in
                 isMenuButtonHovered = isHovered
                 onMenuHover(isHovered)
             }
             
             DownloadIndicator()
-                .offset(x: 12, y: -12)
+                .offset(x: NookDesign.Spacing.lg, y: -NookDesign.Spacing.lg)
         }
     }
     
@@ -61,8 +69,16 @@ struct SidebarBottomBar: View {
             }
             
             Button("New Folder", systemImage: "folder.badge.plus") {
-                if let currentSpace = browserManager.tabManager.currentSpace {
-                    browserManager.tabManager.createFolder(for: currentSpace.id)
+                if let spaceID = windowState.spaceID {
+                    tabs.createFolderForRename(in: .tabs(spaceID: spaceID), after: nil)
+                }
+            }
+
+            if !windowState.isIncognito {
+                Button("New Pull Requests Folder", systemImage: "arrow.triangle.pull") {
+                    if let spaceID = windowState.spaceID {
+                        tabs.createPullRequestsFolder(in: spaceID)
+                    }
                 }
             }
             
@@ -73,10 +89,8 @@ struct SidebarBottomBar: View {
             }
         } label:{
             Label("Actions", systemImage: "plus")
-                .labelStyle(.iconOnly)
         }
         .menuStyle(.button)
-        .buttonStyle(NavButtonStyle())
-        .foregroundStyle(Color.primary)
+        .nookIconButtons()
     }
 }

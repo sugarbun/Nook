@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  SpacesSideBarView.swift
 //  Nook
@@ -10,16 +11,23 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 import Sparkle
+import NookDesign
+import NookSettings
+import NookTabsCore
+import NookWeb
+import NookUI
 
 struct SpacesSideBarView: View {
     @EnvironmentObject var browserManager: BrowserManager
+    @Environment(TabsController.self) private var tabs
     @Environment(BrowserWindowState.self) private var windowState
     @Environment(WindowRegistry.self) private var windowRegistry
     @Environment(\.nookSettings) var nookSettings
     @Environment(CommandPalette.self) var commandPalette
+    @Environment(TabOrganizerManager.self) var tabOrganizerManager
 
-    // Space navigation
-    @State private var activeSpaceIndex: Int = 0
+    // Space navigation. Keyed by space id: an index outlives the space it pointed at.
+    @State private var activeSpaceID: UUID?
     @State private var activeTabRefreshTrigger: Bool = false
 
     // Hover states
@@ -32,8 +40,7 @@ struct SpacesSideBarView: View {
     var body: some View {
         sidebarContent
             .contentShape(Rectangle())
-            .onHover { state in
-                print("hovering: \(state)")
+            .onHoverTracking { state in
                 isSidebarHovered = state
             }
             .contextMenu {
@@ -55,28 +62,20 @@ struct SpacesSideBarView: View {
         }
     }
 
+    @ObservedObject private var dragSession = NookDragSessionManager.shared
+
     private var mainSidebarContent: some View {
-        let effectiveProfileId = windowState.currentProfileId ?? browserManager.currentProfile?.id
-        let essentialsCount = effectiveProfileId.map { browserManager.tabManager.essentialTabs(for: $0).count } ?? 0
-        let shouldAnimate = (windowRegistry.activeWindow?.id == windowState.id) && !browserManager.isTransitioningProfile
-
-        return VStack(spacing: 8) {
-            // Header (window controls, nav buttons, URL bar)
-            SidebarHeader(isSidebarHovered: isSidebarHovered)
-                .environmentObject(browserManager)
-                .environment(windowState)
-
-            // Pinned tabs grid (hidden in incognito)
-            if !windowState.isIncognito {
-                PinnedGrid(
-                    width: windowState.sidebarContentWidth,
-                    profileId: effectiveProfileId
-                )
-                .environmentObject(browserManager)
-                .environment(windowState)
-                .padding(.horizontal, 8)
-                .modifier(FallbackDropBelowEssentialsModifier())
+        return VStack(spacing: NookDesign.Spacing.sectionGap) {
+            // History buttons: share the traffic-light row on the left, their own row on the right.
+            if nookSettings.sidebarPosition != .left && !nookSettings.topBarAddressView {
+                titleRow
+                    .padding(.horizontal, NookDesign.Spacing.sidebarInset)
             }
+
+            // Header (window controls, nav buttons, URL bar)
+            SidebarHeader(isSidebarHovered: isSidebarHovered, onNewSpace: showSpaceCreationDialog)
+                .environmentObject(browserManager)
+                .environment(windowState)
 
             // Spaces page view with draggable spacer
             ZStack {
@@ -87,12 +86,12 @@ struct SpacesSideBarView: View {
                 Color.clear
                     .contentShape(Rectangle())
                     .conditionalWindowDrag()
-                    .frame(minHeight: 40)
+                    .frame(minHeight: NookDesign.Size.bottomBar)
                     .zIndex(0)
             }
 
             // Downloads menu hover overlay
-            if showDownloadsMenu {
+            if showDownloadsMenu, !browserManager.downloadManager.recentDownloads.isEmpty {
                 downloadsMenuOverlay
             }
 
@@ -101,10 +100,21 @@ struct SpacesSideBarView: View {
                 .environmentObject(browserManager)
                 .environment(windowState)
                 .environment(nookSettings)
-                .padding(.horizontal, 8)
-                .padding(.bottom, 8)
+                .padding(.horizontal, NookDesign.Spacing.sidebarInset)
+                .padding(.bottom, NookDesign.Spacing.sidebarInset)
 
-            // Media controls
+            SidebarWhatsNewCard()
+                .environmentObject(browserManager)
+                .environment(windowState)
+                .padding(.horizontal, NookDesign.Spacing.sidebarInset)
+                .padding(.bottom, NookDesign.Spacing.sidebarInset)
+
+            // Video left playing in another tab, directly above the media controls
+            SidebarPiPView()
+                .environmentObject(browserManager)
+                .environment(windowState)
+
+            // Media controls. Hides itself while the video is showing above it.
             MediaControlsView()
                 .environmentObject(browserManager)
                 .environment(windowState)
@@ -119,20 +129,49 @@ struct SpacesSideBarView: View {
             .environmentObject(browserManager)
             .environment(windowState)
         }
-        .padding(.top, 8)
-        .padding(.bottom, 8)
-        .animation(
-            shouldAnimate ? .easeInOut(duration: 0.18) : nil,
-            value: essentialsCount
+        // Extra top padding when sidebar is on the left to avoid overlapping native traffic light buttons
+        .padding(.top, nookSettings.sidebarPosition == .left ? NookDesign.Spacing.sidebarTop : NookDesign.Spacing.sidebarInset)
+        .overlay(alignment: .topLeading) {
+            if nookSettings.sidebarPosition == .left {
+                titleRow
+                    .frame(height: NookDesign.Spacing.sidebarTop)
+                    .padding(.leading, NookDesign.Spacing.trafficLights)
+                    .padding(.trailing, NookDesign.Spacing.sidebarInset)
+            }
+        }
+        .padding(.bottom, NookDesign.Spacing.sidebarInset)
+        .background(
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear {
+                        updateSidebarScreenFrame(geo)
+                    }
+                    .onChange(of: geo.frame(in: .global)) { _, _ in
+                        updateSidebarScreenFrame(geo)
+                    }
+            }
+        )
+    }
+
+    private func updateSidebarScreenFrame(_ geo: GeometryProxy) {
+        let frame = geo.frame(in: .global)
+        guard let window = windowState.window ?? NSApp.windows.first(where: { $0.isVisible }),
+              let contentView = window.contentView else { return }
+        let appKitY = contentView.bounds.height - frame.maxY
+        let bottomLeft = NSPoint(x: frame.origin.x, y: appKitY)
+        let screenBottomLeft = window.convertPoint(toScreen: bottomLeft)
+        dragSession.sidebarScreenFrame = CGRect(
+            x: screenBottomLeft.x,
+            y: screenBottomLeft.y,
+            width: frame.width,
+            height: frame.height
         )
     }
 
     // MARK: - Spaces Page View
 
     private var spacesPageView: some View {
-        let spaces = windowState.isIncognito
-            ? windowState.ephemeralSpaces
-            : browserManager.tabManager.spaces
+        let spaces = tabs.switchableSpaces(for: windowState)
 
         return Group {
             if spaces.isEmpty {
@@ -143,32 +182,34 @@ struct SpacesSideBarView: View {
         }
     }
 
-    private func spacesContent(spaces: [Space]) -> some View {
-        PageView(selection: $activeSpaceIndex) {
-            ForEach(spaces.indices, id: \.self) { index in
-                if index >= 0 && index < spaces.count {
-                    makeSpaceView(for: spaces[index], index: index)
-                } else {
-                    EmptyView()
-                }
+    private func spacesContent(spaces: [SpaceRecord]) -> some View {
+        // A deleted (or private-window) space falls back to the first one still here.
+        let selection = Binding<UUID> {
+            spaces.first { $0.id == activeSpaceID }?.id ?? spaces[0].id
+        } set: { activeSpaceID = $0 }
+
+        return PageView(selection: selection) {
+            ForEach(spaces) { space in
+                makeSpaceView(for: space)
             }
         }
         .pageViewStyle(.scroll)
         .contentShape(Rectangle())
-        .id(activeTabRefreshTrigger)
+        // Pages are cached hosting views; a different set of spaces needs new pages.
+        .id("\(activeTabRefreshTrigger)|\(spaces.map(\.id.uuidString).joined(separator: ","))")
         .onAppear {
-            if let targetIndex = spaces.firstIndex(where: { $0.id == windowState.currentSpaceId }) {
-                activeSpaceIndex = targetIndex
+            activeSpaceID = windowState.spaceID
+            if !spaces.contains(where: { $0.id == windowState.spaceID }) {
+                tabs.setSpace(spaces[0].id, in: windowState)
             }
-            browserManager.setActiveSpace(spaces[0], in: windowState)
         }
-        .onChange(of: activeSpaceIndex) { _, newIndex in
-            handleSpaceIndexChange(newIndex, spaces: spaces)
+        .onChange(of: activeSpaceID) { _, newID in
+            handleSpaceSelectionChange(newID, spaces: spaces)
         }
-        .onChange(of: windowState.currentSpaceId) { _, _ in
-            if let targetIndex = spaces.firstIndex(where: { $0.id == windowState.currentSpaceId }) {
-                activeSpaceIndex = targetIndex
-            }
+        .onChange(of: windowState.spaceID) { _, newID in
+            // A swipe already shows this space; rebuilding every page after it stalled the swipe.
+            guard activeSpaceID != newID else { return }
+            activeSpaceID = newID
             activeTabRefreshTrigger.toggle()
         }
         .onChange(of: windowState.sidebarContentWidth) { _, _ in
@@ -176,12 +217,13 @@ struct SpacesSideBarView: View {
         }
     }
 
+
     private var emptyStateView: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: NookDesign.Spacing.xl) {
             Image(systemName: "square.grid.2x2")
-                .font(.system(size: 48))
+                .font(NookDesign.Font.hero)
                 .foregroundColor(.secondary)
-            VStack(spacing: 8) {
+            VStack(spacing: NookDesign.Spacing.md) {
                 Text("No Spaces")
                     .font(.title2)
                     .fontWeight(.semibold)
@@ -201,7 +243,7 @@ struct SpacesSideBarView: View {
 
     private var downloadsMenuOverlay: some View {
         SidebarMenuHoverDownloads(isVisible: animateDownloadsMenu)
-            .onHover { isHovered in
+            .onHoverTracking { isHovered in
                 isDownloadsHovered = isHovered
                 if isHovered {
                     showDownloadsMenu = true
@@ -223,11 +265,21 @@ struct SpacesSideBarView: View {
             }
 
             Button {
-                if let currentSpace = browserManager.tabManager.currentSpace {
-                    browserManager.tabManager.createFolder(for: currentSpace.id)
+                if let spaceID = windowState.spaceID {
+                    tabs.createFolderForRename(in: .tabs(spaceID: spaceID), after: nil)
                 }
             } label: {
                 Label("New Folder", systemImage: "folder.badge.plus")
+            }
+
+            if !windowState.isIncognito {
+                Button {
+                    if let spaceID = windowState.spaceID {
+                        tabs.createPullRequestsFolder(in: spaceID)
+                    }
+                } label: {
+                    Label("New Pull Requests Folder", systemImage: "arrow.triangle.pull")
+                }
             }
 
             Divider()
@@ -250,7 +302,7 @@ struct SpacesSideBarView: View {
     // MARK: - Helper Functions
 
     private func handleMenuTap() {
-        withAnimation(.easeInOut(duration: 0.2)) {
+        withAnimation(NookDesign.Motion.standard) {
             windowState.isSidebarMenuVisible = true
             windowState.isSidebarAIChatVisible = false
             let previousWidth = windowState.sidebarWidth
@@ -281,45 +333,60 @@ struct SpacesSideBarView: View {
         }
     }
 
-    private func handleSpaceIndexChange(_ newIndex: Int, spaces: [Space]) {
-        guard newIndex >= 0 && newIndex < spaces.count else {
-            print("⚠️ Invalid space index: \(newIndex), spaces count: \(spaces.count)")
-            return
-        }
-
-        let space = spaces[newIndex]
-        print("🎯 Page changed to space: \(space.name) (index: \(newIndex))")
-
-        // Trigger haptic feedback
-        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .default)
-
-        // Activate the space
-        browserManager.setActiveSpace(space, in: windowState)
+    private func handleSpaceSelectionChange(_ newID: UUID?, spaces: [SpaceRecord]) {
+        guard let newID, newID != windowState.spaceID, spaces.contains(where: { $0.id == newID }) else { return }
+        // Haptic fires during swipe at 15% offset in PlatformPageView
+        tabs.setSpace(newID, in: windowState)
     }
 
     @ViewBuilder
-    private func makeSpaceView(for space: Space, index: Int) -> some View {
+    private func makeSpaceView(for space: SpaceRecord) -> some View {
         VStack(spacing: 0) {
+            if !windowState.isIncognito {
+                PinnedGrid(
+                    width: windowState.sidebarContentWidth,
+                    spaceID: space.id
+                )
+                .environmentObject(browserManager)
+                .environment(tabs)
+                .environment(windowState)
+                .environment(windowRegistry)
+                .environment(nookSettings)
+                .padding(.horizontal, NookDesign.Spacing.sidebarInset)
+                .padding(.bottom, NookDesign.Spacing.sectionGap)
+            }
+
             SpaceView(
-                space: space,
-                isActive: windowState.currentSpaceId == space.id,
-                isSidebarHovered: $isSidebarHovered,
-                onActivateTab: { browserManager.selectTab($0, in: windowState) },
-                onCloseTab: { browserManager.tabManager.removeTab($0.id) },
-                onPinTab: { browserManager.tabManager.pinTab($0) },
-                onMoveTabUp: { browserManager.tabManager.moveTabUp($0.id) },
-                onMoveTabDown: { browserManager.tabManager.moveTabDown($0.id) },
-                onMuteTab: { $0.toggleMute() }
+                spaceID: space.id,
+                isActive: windowState.spaceID == space.id,
+                isSidebarHovered: $isSidebarHovered
             )
+            // Pages are separate hosting views and inherit nothing; a split row needs `tabs`.
             .environmentObject(browserManager)
+            .environment(tabs)
+            .environment(\.tabActions, browserManager)
             .environment(windowState)
+            .environment(windowRegistry)
             .environment(commandPalette)
+            .environment(tabOrganizerManager)
+            .environment(nookSettings)
             .environmentObject(browserManager.gradientColorManager)
             .environmentObject(browserManager.splitManager)
             .id(space.id.uuidString + "-w\(Int(windowState.sidebarContentWidth))")
             Spacer()
         }
-        .tag(index)
+    }
+
+    /// Back, forward and reload at the trailing edge, unless the URL bar mode has them.
+    private var titleRow: some View {
+        HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            if !nookSettings.topBarAddressView {
+                SidebarHistoryButtons()
+                    .environmentObject(browserManager)
+                    .environment(windowState)
+            }
+        }
     }
 
     // MARK: - Dialogs
@@ -327,23 +394,15 @@ struct SpacesSideBarView: View {
     private func showSpaceCreationDialog() {
         browserManager.dialogManager.showDialog(
             SpaceCreationDialog(
-                onCreate: { name, icon, profileId in
-                    let finalName = name.isEmpty ? "New Space" : name
-                    let finalIcon = icon.isEmpty ? "✨" : icon
-                    let newSpace = browserManager.tabManager.createSpace(
-                        name: finalName,
-                        icon: finalIcon
-                    )
-
-                    // Assign profile if one was selected
-                    if let profileId = profileId {
-                        browserManager.tabManager.assign(spaceId: newSpace.id, toProfile: profileId)
+                onCreate: { name, accentHex in
+                    if let spaceID = tabs.createSpace(
+                        name: name.isEmpty ? "New Space" : name,
+                        icon: "square.grid.2x2",
+                        accentHex: accentHex,
+                        after: tabs.orderedSpaces.last?.id
+                    ) {
+                        tabs.setSpace(spaceID, in: windowState)
                     }
-
-                    if let targetIndex = browserManager.tabManager.spaces.firstIndex(where: { $0.id == newSpace.id }) {
-                        activeSpaceIndex = targetIndex
-                    }
-
                     browserManager.dialogManager.closeDialog()
                 },
                 onCancel: {
@@ -353,65 +412,6 @@ struct SpacesSideBarView: View {
         )
     }
 
-    private func showSpaceEditDialog(mode: SpaceEditDialog.Mode) {
-        guard let targetSpace = resolveCurrentSpace() else { return }
-
-        browserManager.dialogManager.showDialog(
-            SpaceEditDialog(
-                space: targetSpace,
-                mode: mode,
-                onSave: { newName, newIcon, newProfileId in
-                    let spaceId = targetSpace.id
-
-                    do {
-                        if newIcon != targetSpace.icon {
-                            try browserManager.tabManager.updateSpaceIcon(
-                                spaceId: spaceId,
-                                icon: newIcon
-                            )
-                        }
-
-                        if newName != targetSpace.name {
-                            try browserManager.tabManager.renameSpace(
-                                spaceId: spaceId,
-                                newName: newName
-                            )
-                        }
-
-                        // Update profile if changed
-                        if newProfileId != targetSpace.profileId, let profileId = newProfileId {
-                            browserManager.tabManager.assign(spaceId: spaceId, toProfile: profileId)
-                        }
-
-                        browserManager.dialogManager.closeDialog()
-                    } catch {
-                        print("⚠️ Failed to update space \(spaceId.uuidString):", error)
-                    }
-                },
-                onCancel: {
-                    browserManager.dialogManager.closeDialog()
-                }
-            )
-        )
-    }
-
-    private func resolveCurrentSpace() -> Space? {
-        // For incognito windows, use ephemeral spaces
-        if windowState.isIncognito {
-            if let currentId = windowState.currentSpaceId {
-                return windowState.ephemeralSpaces.first { $0.id == currentId }
-            }
-            return windowState.ephemeralSpaces.first
-        }
-        
-        if let current = browserManager.tabManager.currentSpace {
-            return current
-        }
-        if let currentId = windowState.currentSpaceId {
-            return browserManager.tabManager.spaces.first { $0.id == currentId }
-        }
-        return browserManager.tabManager.spaces.first
-    }
 
     // MARK: - Computed Properties
 

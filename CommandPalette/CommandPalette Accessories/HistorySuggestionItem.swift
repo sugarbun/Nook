@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  HistorySuggestionItem.swift
 //  Nook
@@ -6,7 +7,9 @@
 //
 
 import SwiftUI
-import FaviconFinder
+import NookDesign
+import NookWeb
+import NookUI
 
 struct HistorySuggestionItem: View {
     let entry: HistoryEntry
@@ -14,12 +17,10 @@ struct HistorySuggestionItem: View {
     
     @State private var isHovered: Bool = false
     @State private var resolvedFavicon: SwiftUI.Image? = nil
-    @Environment(\.colorScheme) var colorScheme
-    
+
     // Color configuration
     private var colors: ColorConfig {
         ColorConfig(
-            isDark: colorScheme == .dark,
             isSelected: isSelected,
             isHovered: isHovered
         )
@@ -36,21 +37,21 @@ struct HistorySuggestionItem: View {
             }
             .frame(width: 24, height: 24)
             .background(colors.faviconBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .clipShape(NookDesign.Radius.shape(NookDesign.Radius.xs))
             
             HStack(spacing: 4) {
                 Text(entry.displayTitle)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(NookDesign.Font.label)
                     .foregroundStyle(colors.titleColor)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 
                 Text("-")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(NookDesign.Font.label)
                     .foregroundStyle(colors.urlColor)
                 
                 Text(entry.displayURL)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(NookDesign.Font.label)
                     .foregroundStyle(colors.urlColor)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -58,75 +59,50 @@ struct HistorySuggestionItem: View {
             Spacer()
         }
         .frame(maxWidth: .infinity)
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.15)) {
+        .onHoverTracking { hovering in
+            withAnimation(NookDesign.Motion.quick) {
                 isHovered = hovering
             }
         }
-        .onAppear {
-            Task { await fetchFavicon(for: entry.url) }
+        // Rows are keyed by index, so a row is reused for the next entry as the query changes.
+        .task(id: entry.url) {
+            resolvedFavicon = nil
+            let image = await fetchFavicon(for: entry.url)
+            if !Task.isCancelled { resolvedFavicon = image.map(SwiftUI.Image.init(nsImage:)) }
         }
     }
-    
-    private func fetchFavicon(for url: URL) async {
-        let defaultFavicon = SwiftUI.Image(systemName: "globe")
-        guard url.scheme == "http" || url.scheme == "https", url.host != nil else {
-            await MainActor.run { self.resolvedFavicon = defaultFavicon }
-            return
-        }
-        
-        let cacheKey = url.host ?? url.absoluteString
-        if let cachedFavicon = Tab.getCachedFavicon(for: cacheKey) {
-            await MainActor.run { self.resolvedFavicon = cachedFavicon }
-            return
-        }
-        
-        do {
-            let favicon = try await FaviconFinder(url: url)
-                .fetchFaviconURLs()
-                .download()
-                .largest()
-            if let faviconImage = favicon.image {
-                let nsImage = faviconImage.image
-                let swiftUIImage = SwiftUI.Image(nsImage: nsImage)
-                
-                Tab.cacheFavicon(swiftUIImage, for: cacheKey)
-                
-                await MainActor.run { self.resolvedFavicon = swiftUIImage }
-            } else {
-                await MainActor.run { self.resolvedFavicon = defaultFavicon }
-            }
-        } catch {
-            await MainActor.run { self.resolvedFavicon = defaultFavicon }
-        }
+
+    private func fetchFavicon(for url: URL) async -> NSImage? {
+        guard url.scheme == "http" || url.scheme == "https", let cacheKey = url.host else { return nil }
+        // Cache only: a row shown for one keystroke must not start a network fetch.
+        return await FaviconCache.shared.cachedImage(for: cacheKey)
     }
 }
 
 // MARK: - Colors simplified
 private struct ColorConfig {
-    let isDark: Bool
     let isSelected: Bool
     let isHovered: Bool
-    
+
     var titleColor: Color {
         if isSelected {
             return .white
         }
-        return isDark ? .white : .black
+        return .primary
     }
-    
+
     var urlColor: Color {
         if isSelected {
             return .white.opacity(0.5)
         }
-        return isDark ? .white.opacity(0.3) : .black.opacity(0.3)
+        return .secondary
     }
     
     var faviconColor: Color {
-        return .white.opacity(0.5)
+        return isSelected ? .white.opacity(0.7) : .secondary
     }
     
     var faviconBackground: Color {
-        return isSelected ? .white : .clear
+        return isSelected ? .white : NookDesign.Surface.fill
     }
 }

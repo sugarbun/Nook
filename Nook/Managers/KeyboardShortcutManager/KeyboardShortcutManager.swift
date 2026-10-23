@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  KeyboardShortcutManager.swift
 //  Nook
@@ -8,6 +9,8 @@
 import Foundation
 import AppKit
 import SwiftUI
+import WebKit
+import NookWeb
 
 @MainActor
 @Observable
@@ -15,7 +18,7 @@ class KeyboardShortcutManager {
     private let userDefaults = UserDefaults.standard
     private let shortcutsKey = "keyboard.shortcuts"
     private let shortcutsVersionKey = "keyboard.shortcuts.version"
-    private let currentVersion = 5 // Increment when adding new shortcuts
+    private let currentVersion = 6 // Increment when adding new shortcuts; 6 added Print (Cmd+P)
 
     /// Hash-based storage for O(1) lookup: ["cmd+t": KeyboardShortcut]
     private var shortcutMap: [String: KeyboardShortcut] = [:]
@@ -33,6 +36,15 @@ class KeyboardShortcutManager {
     
     /// Detector for website keyboard shortcut conflicts
     let websiteShortcutDetector = WebsiteShortcutDetector()
+
+    /// Actions a page's self-reported shortcuts never take the first press of. The report
+    /// comes from the page, so a site could otherwise swallow the keys that leave it.
+    /// Keyed by action so a rebound shortcut stays covered; built-in site profiles are
+    /// not affected.
+    private static let neverYieldedToPageReports: Set<ShortcutAction> = [
+        .closeTab, .closeWindow, .closeBrowser, .newTab, .newWindow,
+        .focusAddressBar, .openCommandPalette, .toggleFullScreen,
+    ]
 
     init() {
         loadShortcuts()
@@ -81,7 +93,9 @@ class KeyboardShortcutManager {
         for defaultShortcut in defaultShortcuts {
             // Check if this shortcut already exists (by action)
             if !shortcutMap.values.contains(where: { $0.action == defaultShortcut.action }) {
-                // Add missing shortcut
+                // The map is keyed by key combination, so a new default on a key the user gave
+                // another action would silently replace theirs. Theirs wins.
+                guard shortcutMap[defaultShortcut.lookupKey] == nil else { continue }
                 shortcutMap[defaultShortcut.lookupKey] = defaultShortcut
                 needsUpdate = true
             }
@@ -178,13 +192,29 @@ class KeyboardShortcutManager {
     func executeShortcut(_ event: NSEvent) -> Bool {
         // Prevent re-entrancy when forwarding events to WebView
         guard !isForwardingEvent else {
-            print("⌨️ [KSM] Skipping - already forwarding event")
             return false
         }
-        
+
+        // If the key window is not a Nook browser window (e.g. Settings), let the event
+        // pass through so standard macOS shortcuts (Cmd+W to close, etc.) work normally
+        if let keyWindow = NSApp.keyWindow,
+           !(windowRegistry?.windows.values.contains(where: { $0.window === keyWindow }) ?? false) {
+            return false
+        }
+
+        let keyCode = event.keyCode
+        if keyCode == 36 || keyCode == 76 { // 36 = Return, 76 = Enter (numpad)
+            let hasModifiers = event.modifierFlags.contains(.command) ||
+                              event.modifierFlags.contains(.option) ||
+                              event.modifierFlags.contains(.control) ||
+                              event.modifierFlags.contains(.shift)
+            if !hasModifiers {
+                return false
+            }
+        }
+
         // Arrow keys and other navigation keys should pass through to the WebView
         // UNLESS they have modifiers (cmd, option, etc.) - those might be Nook shortcuts
-        let keyCode = event.keyCode
         let navigationKeyCodes: Set<UInt16> = [
             123, // left arrow
             124, // right arrow
@@ -209,46 +239,33 @@ class KeyboardShortcutManager {
         }
         
         guard let keyCombination = KeyCombination(from: event) else { 
-            print("⌨️ [KSM] Could not create KeyCombination from event")
             return false
         }
         
-        print("⌨️ [KSM] ===== KEYDOWN: \(keyCombination.lookupKey) =====")
 
         guard let shortcut = shortcutMap[keyCombination.lookupKey],
               shortcut.isEnabled else {
-            print("⌨️ [KSM] No Nook shortcut for: \(keyCombination.lookupKey)")
             return false
         }
         
-        print("⌨️ [KSM] Found Nook shortcut: \(shortcut.action.displayName)")
 
         // MARK: - Website Shortcut Conflict Resolution
         // Check if this shortcut conflicts with a website shortcut
         if let windowId = windowRegistry?.activeWindow?.id {
-            print("⌨️ [KSM] Checking for website conflict, windowId: \(windowId)")
             let shouldPass = websiteShortcutDetector.shouldPassToWebsite(
                 keyCombination,
                 windowId: windowId,
-                nookActionName: shortcut.action.displayName
+                nookActionName: shortcut.action.displayName,
+                allowPageReports: !Self.neverYieldedToPageReports.contains(shortcut.action)
             )
             
             if shouldPass {
                 // First press: Forward event directly to the WebView
-                print("⌨️ [KSM] >>> FIRST PRESS - Forwarding to WebView <<<")
                 forwardEventToWebView(event)
                 return true // We handled it (by forwarding)
-            } else if websiteShortcutDetector.hasPendingShortcut(for: windowId) {
-                // Second press within timeout - we'll execute Nook action below
-                print("⌨️ [KSM] >>> SECOND PRESS - Executing Nook action <<<")
-            } else {
-                print("⌨️ [KSM] No conflict detected, executing Nook action")
             }
-        } else {
-            print("⌨️ [KSM] No active window found for conflict check")
         }
 
-        print("⌨️ [KSM] Executing Nook shortcut: \(shortcut.action.displayName)")
         executeAction(shortcut.action)
         return true
     }
@@ -256,10 +273,9 @@ class KeyboardShortcutManager {
     /// Forward a keyboard event directly to the active WebView
     private func forwardEventToWebView(_ event: NSEvent) {
         guard let windowState = windowRegistry?.activeWindow,
-              let tabId = windowState.currentTabId,
+              let tabId = windowState.selectedItemID,
               let windowId = windowRegistry?.activeWindow?.id,
               let webView = browserManager?.getWebView(for: tabId, in: windowId) else {
-            print("⌨️ [KSM] Could not find WebView to forward event")
             return
         }
         
@@ -277,7 +293,6 @@ class KeyboardShortcutManager {
         
         // Also call keyDown for native WebView handling (scroll, copy/paste, etc.)
         webView.keyDown(with: event)
-        print("⌨️ [KSM] Event forwarded to WebView via JS and keyDown")
     }
     
     /// Dispatch a keyboard event to the WebView's DOM via JavaScript
@@ -343,9 +358,7 @@ class KeyboardShortcutManager {
         
         webView.evaluateJavaScript(js) { result, error in
             if let error = error {
-                print("⌨️ [KSM] JS dispatch error: \(error.localizedDescription)")
             } else {
-                print("⌨️ [KSM] JS dispatch result: \(result ?? "nil")")
             }
         }
     }
@@ -430,59 +443,64 @@ class KeyboardShortcutManager {
 
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            let tabs = browserManager.tabs
+            let window = self.windowRegistry?.activeWindow
 
             switch action {
             // Navigation
             case .goBack:
                 // Use window-specific webview like the UI buttons do
-                if let tab = browserManager.currentTabForActiveWindow(),
-                   let windowId = self.windowRegistry?.activeWindow?.id,
-                   let webView = browserManager.getWebView(for: tab.id, in: windowId) {
-                    if webView.canGoBack {
-                        webView.goBack()
-                    }
+                if let window = self.windowRegistry?.activeWindow, let session = tabs.controllableSession(in: window) {
+                    session.goBack(in: browserManager.getWebView(for: session.itemID, in: window.id))
                 }
             case .goForward:
                 // Use window-specific webview like the UI buttons do
-                if let tab = browserManager.currentTabForActiveWindow(),
-                   let windowId = self.windowRegistry?.activeWindow?.id,
-                   let webView = browserManager.getWebView(for: tab.id, in: windowId) {
+                if let window = self.windowRegistry?.activeWindow,
+                   let itemID = window.selectedItemID,
+                   let webView = browserManager.getWebView(for: itemID, in: window.id) {
                     if webView.canGoForward {
                         webView.goForward()
                     }
                 }
             case .refresh:
-                browserManager.refreshCurrentTabInActiveWindow()
+                tabs.activeWindowSession?.refresh()
             case .clearCookiesAndRefresh:
                 browserManager.clearCurrentPageCookies()
-                browserManager.refreshCurrentTabInActiveWindow()
+                tabs.activeWindowSession?.refresh()
 
             // Tab Management
             case .newTab:
                 self.windowRegistry?.activeWindow?.commandPalette?.open()
             case .closeTab:
-                browserManager.closeCurrentTab()
+                if let window, !window.isCommandPaletteVisible {
+                    // With no tab open (the empty space), Cmd+W closes the window.
+                    if window.selectedItemID == nil {
+                        window.window?.performClose(nil)
+                    } else {
+                        tabs.closeSelected(in: window)
+                    }
+                }
             case .undoCloseTab:
-                browserManager.undoCloseTab()
+                if let window { tabs.reopenLastClosed(in: window) }
             case .nextTab:
-                browserManager.selectNextTabInActiveWindow()
+                if let window { tabs.selectNext(in: window) }
             case .previousTab:
-                browserManager.selectPreviousTabInActiveWindow()
+                if let window { tabs.selectPrevious(in: window) }
             case .goToTab1, .goToTab2, .goToTab3, .goToTab4, .goToTab5, .goToTab6, .goToTab7, .goToTab8:
                 let tabIndex = Int(action.rawValue.components(separatedBy: "_").last ?? "0") ?? 1
-                browserManager.selectTabByIndexInActiveWindow(tabIndex - 1)
+                if let window { tabs.select(index: tabIndex - 1, in: window) }
             case .goToLastTab:
-                browserManager.selectLastTabInActiveWindow()
+                if let window { tabs.selectLast(in: window) }
             case .duplicateTab:
-                browserManager.duplicateCurrentTab()
+                if let window, let selected = window.selectedItemID { tabs.duplicate(selected, in: window) }
             case .toggleTopBarAddressView:
                 browserManager.toggleTopBarAddressView()
 
             // Space Management
             case .nextSpace:
-                browserManager.selectNextSpaceInActiveWindow()
+                if let window { tabs.selectNextSpace(in: window) }
             case .previousSpace:
-                browserManager.selectPreviousSpaceInActiveWindow()
+                if let window { tabs.selectPreviousSpace(in: window) }
 
             // Window Management
             case .newWindow:
@@ -504,11 +522,11 @@ class KeyboardShortcutManager {
             case .viewHistory:
                 browserManager.showHistory()
             case .expandAllFolders:
-                browserManager.expandAllFoldersInSidebar()
+                if let spaceID = window?.spaceID { tabs.setAllFolders(open: true, space: spaceID) }
 
             // NEW: Missing actions that were only in NookCommands
             case .focusAddressBar:
-                let currentURL = browserManager.currentTabForActiveWindow()?.url.absoluteString ?? ""
+                let currentURL = tabs.activeWindowSession?.url.absoluteString ?? ""
                 self.windowRegistry?.activeWindow?.commandPalette?.open(prefill: currentURL, navigateCurrentTab: true)
             case .findInPage:
                 browserManager.showFindBar()
@@ -525,26 +543,23 @@ class KeyboardShortcutManager {
             case .toggleAIAssistant:
                 browserManager.toggleAISidebar()
             case .togglePictureInPicture:
-                browserManager.requestPiPForCurrentTabInActiveWindow()
+                tabs.activeWindowSession?.requestPictureInPicture()
             case .copyCurrentURL:
                 browserManager.copyCurrentURL()
+            case .printPage:
+                browserManager.printCurrentPage()
             case .hardReload:
                 browserManager.hardReloadCurrentPage()
             case .muteUnmuteAudio:
-                browserManager.toggleMuteCurrentTabInActiveWindow()
+                tabs.activeWindowSession?.toggleMute()
             case .installExtension:
                 browserManager.showExtensionInstallDialog()
             case .customizeSpaceGradient:
-                browserManager.showGradientEditor()
-            case .createBoost:
-                browserManager.showBoostsDialog()
+                browserManager.showSpaceSettings()
+            case .organizeTabs:
+                NotificationCenter.default.post(name: .organizeTabsRequested, object: nil)
             }
 
-            NotificationCenter.default.post(
-                name: .shortcutExecuted,
-                object: nil,
-                userInfo: ["action": action]
-            )
         }
     }
 
@@ -561,6 +576,12 @@ class KeyboardShortcutManager {
                 return nil // Consume the event
             }
 
+            // Forward unhandled key events to extension commands (chrome.commands API).
+            // This enables extension keyboard shortcuts like Bitwarden's Ctrl+Shift+L.
+            if ExtensionManager.shared.tryPerformExtensionCommand(for: event) {
+                return nil
+            }
+
             return event // Pass through
         }
         self.eventMonitor = monitor
@@ -575,6 +596,5 @@ class KeyboardShortcutManager {
 
 // MARK: - Notification
 extension Notification.Name {
-    static let shortcutExecuted = Notification.Name("shortcutExecuted")
-    static let shortcutsChanged = Notification.Name("shortcutsChanged")
+    static let organizeTabsRequested = Notification.Name("organizeTabsRequested")
 }

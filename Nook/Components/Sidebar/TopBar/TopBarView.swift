@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  TopBarView.swift
 //  Nook
@@ -7,6 +8,10 @@
 
 import AppKit
 import SwiftUI
+import WebKit
+import NookDesign
+import NookWeb
+import NookUI
 
 enum TopBarMetrics {
     static let height: CGFloat = 40
@@ -19,23 +24,11 @@ struct TopBarView: View {
     @Environment(BrowserWindowState.self) private var windowState
     @Environment(CommandPalette.self) private var commandPalette
     @Environment(\.nookSettings) var nookSettings
-    @StateObject private var tabWrapper = ObservableTabWrapper()
     @State private var isHovering: Bool = false
     @State private var previousTabId: UUID? = nil
 
     var body: some View {
-        let cornerRadius: CGFloat = {
-            if #available(macOS 26.0, *) {
-                return 8
-            } else {
-                return 8
-            }
-        }()
-
-        let currentTab = browserManager.currentTab(for: windowState)
-        let hasPiPControl =
-            currentTab?.hasVideoContent == true
-            || browserManager.currentTabHasPiPActive()
+        let cornerRadius: CGFloat = nookSettings.hideWebContentBorder ? 0 : NookDesign.Radius.md
 
         ZStack {
             // Main content
@@ -43,16 +36,9 @@ struct TopBarView: View {
                 HStack(spacing: 8) {
                     navigationControls
 
-                    if hasPiPControl, let tab = currentTab {
-                        pipButton(for: tab)
-                    }
-
                     urlBar
 
                     Spacer()
-                    
-                    extensionsView
-
 
                     if browserManager.nookSettings?.showAIAssistant ?? false
                         && !windowState.isSidebarAIChatVisible
@@ -69,7 +55,7 @@ struct TopBarView: View {
             .frame(height: TopBarMetrics.height)
             .background(topBarBackgroundColor)
             .animation(
-                shouldAnimateColorChange ? .easeInOut(duration: 0.3) : nil,
+                shouldAnimateColorChange ? NookDesign.Motion.standard : nil,
                 value: topBarBackgroundColor
             )
             .clipShape(
@@ -88,7 +74,7 @@ struct TopBarView: View {
                     .frame(height: 1)
                     .animation(
                         shouldAnimateColorChange
-                            ? .easeInOut(duration: 0.3) : nil,
+                            ? NookDesign.Motion.standard : nil,
                         value: bottomBorderColor
                     )
             }
@@ -103,68 +89,30 @@ struct TopBarView: View {
             }
         )
         .onAppear {
-            tabWrapper.setContext(
-                browserManager: browserManager,
-                windowState: windowState
-            )
-            updateCurrentTab()
-            // Initialize previousTabId to current tab so first color change doesn't animate
-            previousTabId = browserManager.currentTab(for: windowState)?.id
+            // Initialize previousTabId to the selection so the first color change doesn't animate
+            previousTabId = windowState.selectedItemID
         }
-        .onChange(of: browserManager.currentTab(for: windowState)?.id) {
-            oldId,
-            newId in
+        .onChange(of: windowState.selectedItemID) { oldId, newId in
             previousTabId = oldId
-            updateCurrentTab()
-            // Update previousTabId after a brief delay so next color change within this tab will animate
+            // Update previousTabId after a brief delay so the next color change within this page animates
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 previousTabId = newId
             }
         }
-        .onChange(
-            of: browserManager.currentTab(for: windowState)?.pageBackgroundColor
-        ) { _, _ in
-            // Color changes will trigger animations automatically via computed properties
-        }
-        .onChange(
-            of: browserManager.currentTab(for: windowState)?
-                .topBarBackgroundColor
-        ) { _, _ in
-            // Top bar color changes will trigger animations automatically via computed properties
-        }
-        .onReceive(
-            Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
-        ) { _ in
-            updateCurrentTab()
-        }
-    }
-
-    private var extensionsView: some View {
-        HStack(spacing: 4) {
-            if let extensionManager = browserManager.extensionManager {
-                ExtensionActionView(
-                    extensions: extensionManager.installedExtensions
-                )
-                .environmentObject(browserManager)
-            }
-
-        }
-
-
     }
 
     private var navigationControls: some View {
         HStack(spacing: 4) {
             Button("Go Back", systemImage: "chevron.backward", action: goBack)
                 .labelStyle(.iconOnly)
-                .buttonStyle(NavButtonStyle())
+                .buttonStyle(NookIconButtonStyle())
                 .foregroundStyle(navButtonColor)
                 .animation(
-                    shouldAnimateColorChange ? .easeInOut(duration: 0.3) : nil,
+                    shouldAnimateColorChange ? NookDesign.Motion.standard : nil,
                     value: navButtonColor
                 )
-                .disabled(!tabWrapper.canGoBack)
-                .opacity(tabWrapper.canGoBack ? 1.0 : 0.4)
+                .disabled(!(session?.canGoBackOrReturn ?? false))
+                .opacity((session?.canGoBackOrReturn ?? false) ? 1.0 : 0.4)
                 .contextMenu {
                     NavigationHistoryContextMenu(
                         historyType: .back,
@@ -178,14 +126,14 @@ struct TopBarView: View {
                 action: goForward
             )
             .labelStyle(.iconOnly)
-            .buttonStyle(NavButtonStyle())
+            .buttonStyle(NookIconButtonStyle())
             .foregroundStyle(navButtonColor)
             .animation(
-                shouldAnimateColorChange ? .easeInOut(duration: 0.3) : nil,
+                shouldAnimateColorChange ? NookDesign.Motion.standard : nil,
                 value: navButtonColor
             )
-            .disabled(!tabWrapper.canGoForward)
-            .opacity(tabWrapper.canGoForward ? 1.0 : 0.4)
+            .disabled(!(session?.canGoForward ?? false))
+            .opacity((session?.canGoForward ?? false) ? 1.0 : 0.4)
             .contextMenu {
                 NavigationHistoryContextMenu(
                     historyType: .forward,
@@ -193,16 +141,21 @@ struct TopBarView: View {
                 )
             }
 
-            Button(
-                "Reload",
-                systemImage: "arrow.clockwise",
-                action: refreshCurrentTab
-            )
+            Button {
+                if session?.isLoading == true {
+                    session?.stop()
+                } else {
+                    refreshCurrentTab()
+                }
+            } label: {
+                Image(systemName: session?.isLoading == true ? "xmark" : "arrow.clockwise")
+                    .contentTransition(.symbolEffect(.replace))
+            }
             .labelStyle(.iconOnly)
-            .buttonStyle(NavButtonStyle())
+            .buttonStyle(NookIconButtonStyle())
             .foregroundStyle(navButtonColor)
             .animation(
-                shouldAnimateColorChange ? .easeInOut(duration: 0.3) : nil,
+                shouldAnimateColorChange ? NookDesign.Motion.standard : nil,
                 value: navButtonColor
             )
         }
@@ -210,14 +163,50 @@ struct TopBarView: View {
 
     private var urlBar: some View {
         HStack(spacing: 8) {
-            if browserManager.currentTab(for: windowState) != nil {
-                Text(displayURL)
-                    .font(.system(size: 13, weight: .medium, design: .default))
+            if browserManager.tabs.selectedSession(in: windowState) != nil {
+                // URL text area — tappable to open command palette
+                // Two texts so a narrow bar cuts the path or title first and then the host's
+                // head: `accounts.google.com.x.evil.tld` must keep `evil.tld`.
+                HStack(spacing: 0) {
+                    Text(displayURL.host)
+                        .truncationMode(.head)
+                        .layoutPriority(1)
+                    Text(displayURL.rest)
+                        .truncationMode(.tail)
+                }
+                    .font(NookDesign.Font.body)
                     .foregroundStyle(urlBarTextColor)
                     .tracking(-0.1)
                     .lineLimit(1)
-                    .truncationMode(.tail)
-                Spacer()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        if let currentTab = browserManager.tabs.selectedSession(in: windowState) {
+                            commandPalette.openWithCurrentURL(currentTab.url)
+                        } else {
+                            commandPalette.open()
+                        }
+                    }
+
+                // Pinned extension buttons + library button (not covered by tap gesture)
+                if let extensionManager = browserManager.extensionManager {
+                    let pinnedIDs = browserManager.nookSettings?.pinnedExtensionIDs ?? []
+                    let pinnedExtensions = extensionManager.installedExtensions.filter { pinnedIDs.contains($0.id) }
+
+                    if !pinnedExtensions.isEmpty {
+                        ExtensionActionView(extensions: pinnedExtensions)
+                            .environmentObject(browserManager)
+                    }
+
+                    ExtensionLibraryButton()
+                        .environmentObject(browserManager)
+                        .onAppear {
+                            let installedIDs = extensionManager.installedExtensions
+                                .filter { $0.isEnabled }
+                                .map { $0.id }
+                            browserManager.nookSettings?.migrateExtensionPinStateIfNeeded(installedExtensionIDs: installedIDs)
+                        }
+                }
             } else {
                 EmptyView()
             }
@@ -226,73 +215,54 @@ struct TopBarView: View {
         .padding(6)
         .background(urlBarBackgroundColor)
         .animation(
-            shouldAnimateColorChange ? .easeInOut(duration: 0.3) : nil,
+            shouldAnimateColorChange ? NookDesign.Motion.standard : nil,
             value: urlBarBackgroundColor
         )
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .onTapGesture {
-            if let currentTab = browserManager.currentTab(for: windowState) {
-                commandPalette.openWithCurrentURL(currentTab.url)
-            } else {
-                commandPalette.open()
-            }
-        }
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.15)) {
+        .clipShape(NookDesign.Radius.shape(NookDesign.Radius.md))
+        .onHoverTracking { hovering in
+            withAnimation(NookDesign.Motion.quick) {
                 isHovering = hovering
             }
         }
     }
 
-    private func updateCurrentTab() {
-        tabWrapper.updateTab(browserManager.currentTab(for: windowState))
+    /// Nil while another window holds the page: its controls stay inert until Move Here.
+    private var session: PageSession? {
+        browserManager.tabs.controllableSession(in: windowState)
+    }
+
+    /// This window's own view of the page, so a clone navigates in its window.
+    private var windowWebView: WKWebView? {
+        session.flatMap { browserManager.webViewCoordinator?.getWebView(for: $0.itemID, in: windowState.id) }
     }
 
     private func goBack() {
-        if let tab = tabWrapper.tab,
-            let webView = browserManager.getWebView(
-                for: tab.id,
-                in: windowState.id
-            )
-        {
-            webView.goBack()
-        } else {
-            tabWrapper.tab?.goBack()
-        }
+        session?.goBack(in: windowWebView)
     }
 
     private func goForward() {
-        if let tab = tabWrapper.tab,
-            let webView = browserManager.getWebView(
-                for: tab.id,
-                in: windowState.id
-            )
-        {
-            webView.goForward()
-        } else {
-            tabWrapper.tab?.goForward()
-        }
+        if let webView = windowWebView { webView.goForward() } else { session?.goForward() }
     }
 
     private func refreshCurrentTab() {
-        tabWrapper.tab?.refresh()
+        session?.refresh()
     }
 
     // Determine if we should animate color changes (within same tab) or snap (tab switch)
     private var shouldAnimateColorChange: Bool {
-        let currentTabId = browserManager.currentTab(for: windowState)?.id
-        return currentTabId == previousTabId
+        let selectedItemID = browserManager.tabs.selectedSession(in: windowState)?.id
+        return selectedItemID == previousTabId
     }
 
     // Top bar background color - matches top-right pixel of webview
     private var topBarBackgroundColor: Color {
-        if let currentTab = browserManager.currentTab(for: windowState),
+        if let currentTab = browserManager.tabs.selectedSession(in: windowState),
             let topBarColor = currentTab.topBarBackgroundColor
         {
             return Color(nsColor: topBarColor)
         }
         // Fallback to page background color if top bar color not available yet
-        if let currentTab = browserManager.currentTab(for: windowState),
+        if let currentTab = browserManager.tabs.selectedSession(in: windowState),
             let pageColor = currentTab.pageBackgroundColor
         {
             return Color(nsColor: pageColor)
@@ -304,14 +274,14 @@ struct TopBarView: View {
 
     // Nav button color - light on dark backgrounds, dark on light backgrounds
     private var navButtonColor: Color {
-        if let currentTab = browserManager.currentTab(for: windowState),
+        if let currentTab = browserManager.tabs.selectedSession(in: windowState),
             let topBarColor = currentTab.topBarBackgroundColor
         {
             return topBarColor.isPerceivedDark
                 ? Color.white.opacity(0.9) : Color.black.opacity(0.8)
         }
         // Fallback to page background color
-        if let currentTab = browserManager.currentTab(for: windowState),
+        if let currentTab = browserManager.tabs.selectedSession(in: windowState),
             let pageColor = currentTab.pageBackgroundColor
         {
             return pageColor.isPerceivedDark
@@ -319,13 +289,12 @@ struct TopBarView: View {
         }
 
         // Fallback
-        return browserManager.gradientColorManager.isDark
-            ? Color.white.opacity(0.9) : Color.black.opacity(0.8)
+        return .primary
     }
 
     // URL bar background color - slightly adjusted for visual distinction
     private var urlBarBackgroundColor: Color {
-        if let currentTab = browserManager.currentTab(for: windowState),
+        if let currentTab = browserManager.tabs.selectedSession(in: windowState),
             let topBarColor = currentTab.topBarBackgroundColor
         {
             let baseColor = Color(nsColor: topBarColor)
@@ -342,7 +311,7 @@ struct TopBarView: View {
             }
         }
         // Fallback to page background color
-        if let currentTab = browserManager.currentTab(for: windowState),
+        if let currentTab = browserManager.tabs.selectedSession(in: windowState),
             let pageColor = currentTab.pageBackgroundColor
         {
             let baseColor = Color(nsColor: pageColor)
@@ -360,39 +329,32 @@ struct TopBarView: View {
                 )
             }
         }
-        // Fallback to original AppColors when no webview color available
-        if isHovering {
-            return browserManager.gradientColorManager.isDark
-                ? AppColors.pinnedTabHoverDark : AppColors.pinnedTabHoverLight
-        } else {
-            return browserManager.gradientColorManager.isDark
-                ? AppColors.pinnedTabIdleDark : AppColors.pinnedTabIdleLight
-        }
+        // Fallback to a surface token when no webview color available
+        return isHovering ? NookDesign.Surface.fillPressed : NookDesign.Surface.fill
     }
 
     // Text color for URL bar - ensures proper contrast
     private var urlBarTextColor: Color {
-        if let currentTab = browserManager.currentTab(for: windowState),
+        if let currentTab = browserManager.tabs.selectedSession(in: windowState),
             let topBarColor = currentTab.topBarBackgroundColor
         {
             return topBarColor.isPerceivedDark
                 ? Color.white.opacity(0.55) : Color.black.opacity(0.8)
         }
         // Fallback to page background color
-        if let currentTab = browserManager.currentTab(for: windowState),
+        if let currentTab = browserManager.tabs.selectedSession(in: windowState),
             let pageColor = currentTab.pageBackgroundColor
         {
             return pageColor.isPerceivedDark
                 ? Color.white.opacity(0.55) : Color.black.opacity(0.8)
         }
         // Fallback to original text color logic
-        return browserManager.gradientColorManager.isDark
-            ? AppColors.spaceTabTextDark : AppColors.spaceTabTextLight
+        return .primary
     }
 
     // Bottom border color - lighter when dark, darker when light
     private var bottomBorderColor: Color {
-        if let currentTab = browserManager.currentTab(for: windowState),
+        if let currentTab = browserManager.tabs.selectedSession(in: windowState),
             let topBarColor = currentTab.topBarBackgroundColor
         {
             let baseColor = Color(nsColor: topBarColor)
@@ -403,7 +365,7 @@ struct TopBarView: View {
             )
         }
         // Fallback to page background color
-        if let currentTab = browserManager.currentTab(for: windowState),
+        if let currentTab = browserManager.tabs.selectedSession(in: windowState),
             let pageColor = currentTab.pageBackgroundColor
         {
             let baseColor = Color(nsColor: pageColor)
@@ -442,25 +404,26 @@ struct TopBarView: View {
         #endif
     }
 
-    private var displayURL: AttributedString {
-        guard let currentTab = browserManager.currentTab(for: windowState)
+    private var displayURL: (host: AttributedString, rest: AttributedString) {
+        guard let currentTab = browserManager.tabs.selectedSession(in: windowState)
         else {
-            return ""
+            return ("", "")
         }
 
         return formatURL(
             currentTab.url,
-            title: currentTab.name,
+            title: currentTab.title,
             isHovering: isHovering
         )
     }
 
+    /// The host apart from what follows it, so each can truncate its own way.
     private func formatURL(_ url: URL, title: String?, isHovering: Bool)
-        -> AttributedString
+        -> (host: AttributedString, rest: AttributedString)
     {
         if isHovering {
             guard let host = url.host else {
-                return AttributedString(url.absoluteString)
+                return (AttributedString(url.absoluteString), "")
             }
 
             let cleanHost =
@@ -480,46 +443,24 @@ struct TopBarView: View {
 
             pathString.foregroundColor = urlBarTextColor.opacity(0.35)
 
-            return hostString + pathString
+            return (hostString, pathString)
         }
 
         guard let host = url.host else {
-            return AttributedString(url.absoluteString)
+            return (AttributedString(url.absoluteString), "")
         }
 
         let cleanHost =
             host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
 
         if url.path.isEmpty || url.path == "/" {
-            return AttributedString(cleanHost)
+            return (AttributedString(cleanHost), "")
         } else {
             let displayTitle = title ?? cleanHost
-            var result = AttributedString(cleanHost)
             var titlePart = AttributedString(" / " + displayTitle)
             titlePart.foregroundColor = urlBarTextColor.opacity(0.35)
-            result.append(titlePart)
-            return result
+            return (AttributedString(cleanHost), titlePart)
         }
-    }
-
-    private func pipButton(for tab: Tab) -> some View {
-        Button(action: {
-            tab.requestPictureInPicture()
-        }) {
-            Image(
-                systemName: browserManager.currentTabHasPiPActive()
-                    ? "pip.exit" : "pip.enter"
-            )
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(urlBarTextColor)
-            .animation(
-                shouldAnimateColorChange ? .easeInOut(duration: 0.3) : nil,
-                value: urlBarTextColor
-            )
-            .frame(width: 16, height: 16)
-            .contentShape(RoundedRectangle(cornerRadius: 3))
-        }
-        .buttonStyle(PlainButtonStyle())
     }
 }
 
@@ -541,27 +482,27 @@ struct ChatButton: View {
                 Image(systemName: "message.fill")
                 Text("Chat")
             }
-            .font(.system(size: 13, weight: .medium))
+            .font(NookDesign.Font.body)
             .foregroundStyle(navButtonColor)
             .padding(.horizontal, 9)
             .padding(.vertical, 6)
             .background(backgroundColor)
             .clipShape(
-                RoundedRectangle(cornerRadius: 6)
+                NookDesign.Radius.shape(NookDesign.Radius.sm)
             )
             .contentShape(
-                RoundedRectangle(cornerRadius: 6)
+                NookDesign.Radius.shape(NookDesign.Radius.sm)
             )
         }
         .buttonStyle(.plain)
-        .onHover { state in
+        .onHoverTracking { state in
             isHovered = state
         }
 
     }
     
     private var backgroundColor: Color {
-        let isDark = browserManager.tabManager.currentTab?.topBarBackgroundColor?.isPerceivedDark == true
+        let isDark = browserManager.tabs.selectedSession(in: windowState)?.topBarBackgroundColor?.isPerceivedDark == true
         if isHovered {
             return isDark ? .white.opacity(0.15) : .black.opacity(0.1)
         } else {

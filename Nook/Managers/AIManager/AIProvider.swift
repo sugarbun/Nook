@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  AIProvider.swift
 //  Nook
@@ -6,10 +7,12 @@
 //
 
 import Foundation
+import NookSettings
 
 // MARK: - Provider Protocol
 
 protocol AIProviderProtocol {
+    /// `onStream` gets the whole reply so far each time, not the newest piece.
     func sendMessage(
         messages: [AIMessage],
         model: String,
@@ -85,11 +88,14 @@ struct AIToolCall: Identifiable, Equatable {
     let id: String
     let name: String
     let arguments: [String: Any]
+    /// Gemini's opaque `thoughtSignature`; Gemini 3 rejects a replayed call without it.
+    let thoughtSignature: String?
 
-    init(id: String = UUID().uuidString, name: String, arguments: [String: Any] = [:]) {
+    init(id: String = UUID().uuidString, name: String, arguments: [String: Any] = [:], thoughtSignature: String? = nil) {
         self.id = id
         self.name = name
         self.arguments = arguments
+        self.thoughtSignature = thoughtSignature
     }
 
     static func == (lhs: AIToolCall, rhs: AIToolCall) -> Bool {
@@ -147,6 +153,7 @@ enum AIProviderError: LocalizedError {
     case rateLimited
     case networkError(Error)
     case unsupportedFeature(String)
+    case insecureURL(String)
 
     var errorDescription: String? {
         switch self {
@@ -156,6 +163,7 @@ enum AIProviderError: LocalizedError {
         case .rateLimited: return "Rate limit exceeded. Please try again later."
         case .networkError(let err): return "Network error: \(err.localizedDescription)"
         case .unsupportedFeature(let feature): return "\(feature) is not supported by this provider"
+        case .insecureURL(let url): return "Custom provider URL must use HTTPS for non-local connections: \(url)"
         }
     }
 }

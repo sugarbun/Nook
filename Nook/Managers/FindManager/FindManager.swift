@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  FindManager.swift
 //  Nook
@@ -7,7 +8,7 @@
 
 import Foundation
 import SwiftUI
-import WebKit
+import NookWeb
 
 @MainActor
 class FindManager: ObservableObject {
@@ -17,10 +18,10 @@ class FindManager: ObservableObject {
     @Published var currentMatchIndex: Int = 0
     @Published var isSearching: Bool = false
     
-    var currentTab: Tab?
+    var currentSession: PageSession?
     
-    func showFindBar(for tab: Tab? = nil) {
-        currentTab = tab
+    func showFindBar(for session: PageSession? = nil) {
+        currentSession = session
         isFindBarVisible = true
         searchText = ""
         matchCount = 0
@@ -29,8 +30,8 @@ class FindManager: ObservableObject {
 
     func hideFindBar() {
         // Clear highlights from current tab before hiding
-        if let tab = currentTab {
-            tab.clearFindInPage()
+        if let session = currentSession {
+            session.clearFindInPage()
         }
 
         isFindBarVisible = false
@@ -39,91 +40,84 @@ class FindManager: ObservableObject {
             self?.searchText = ""
             self?.matchCount = 0
             self?.currentMatchIndex = 0
-            self?.currentTab = nil
+            self?.currentSession = nil
         }
     }
     
-    func search(for text: String, in tab: Tab?) {
-        print("FindManager.search called with text: '\(text)', tab: \(String(describing: tab))")
-        
-        guard let tab = tab else {
-            print("FindManager: No tab provided, clearing search")
+    func search(for text: String, in session: PageSession?) {
+        guard let session else {
             clearSearch()
             return
         }
-        
-        currentTab = tab
+
+        currentSession = session
         searchText = text
         isSearching = true
-        
+
         if text.isEmpty {
-            print("FindManager: Empty text, clearing search")
             clearSearch()
             return
         }
-        
-        print("FindManager: Calling tab.findInPage with text: '\(text)'")
+
         // Use JavaScript-based find functionality
-        tab.findInPage(text) { [weak self] result in
+        session.findInPage(text) { [weak self] result in
             DispatchQueue.main.async {
                 self?.isSearching = false
                 switch result {
                 case .success(let (matchCount, currentIndex)):
-                    print("FindManager: Search successful - \(matchCount) matches, current: \(currentIndex)")
                     self?.matchCount = matchCount
                     self?.currentMatchIndex = currentIndex
-                case .failure(let error):
-                    print("FindManager: Find error: \(error.localizedDescription)")
+                case .failure:
                     self?.matchCount = 0
                     self?.currentMatchIndex = 0
                 }
             }
         }
     }
-    
+
     func findNext() {
-        guard let tab = currentTab, !searchText.isEmpty else { return }
-        tab.findNextInPage { [weak self] result in
+        guard let session = currentSession, !searchText.isEmpty else { return }
+        session.findNextInPage { [weak self] result in
             DispatchQueue.main.async {
                 switch result {
                 case .success(let (matchCount, currentIndex)):
                     self?.matchCount = matchCount
                     self?.currentMatchIndex = currentIndex
-                case .failure(let error):
-                    print("Find next error: \(error.localizedDescription)")
+                case .failure:
+                    break
                 }
             }
         }
     }
-    
+
     func findPrevious() {
-        guard let tab = currentTab, !searchText.isEmpty else { return }
-        tab.findPreviousInPage { [weak self] result in
+        guard let session = currentSession, !searchText.isEmpty else { return }
+        session.findPreviousInPage { [weak self] result in
             DispatchQueue.main.async {
                 switch result {
                 case .success(let (matchCount, currentIndex)):
                     self?.matchCount = matchCount
                     self?.currentMatchIndex = currentIndex
-                case .failure(let error):
-                    print("Find previous error: \(error.localizedDescription)")
+                case .failure:
+                    break
                 }
             }
         }
     }
     
     func clearSearch() {
-        guard let tab = currentTab else { return }
-        tab.clearFindInPage()
+        guard let session = currentSession else { return }
+        session.clearFindInPage()
         searchText = ""
         matchCount = 0
         currentMatchIndex = 0
     }
     
-    func updateCurrentTab(_ tab: Tab?) {
-        currentTab = tab
+    func updateCurrentSession(_ session: PageSession?) {
+        currentSession = session
         if isFindBarVisible && !searchText.isEmpty {
             // Re-search in the new tab
-            search(for: searchText, in: tab)
+            search(for: searchText, in: session)
         }
     }
 }

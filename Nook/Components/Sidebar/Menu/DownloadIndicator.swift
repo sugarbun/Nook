@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  DownloadIndicator.swift
 //  Nook
@@ -6,12 +7,15 @@
 //
 
 import SwiftUI
+import NookDesign
 
 struct DownloadIndicator: View {
     @EnvironmentObject var browserManager: BrowserManager
 
+    /// The newest active download. `.first` was whichever the dictionary yielded, so with two
+    /// running the ring could jump between them.
     var currentDownload: Download? {
-        browserManager.downloadManager.activeDownloads.first
+        browserManager.downloadManager.activeDownloads.max { $0.startDate < $1.startDate }
     }
 
     var body: some View {
@@ -21,7 +25,7 @@ struct DownloadIndicator: View {
                     .transition(.slideFromTop)
             }
         }
-        .animation(.spring(duration: 0.55, bounce: 0.6), value: currentDownload?.id)
+        .animation(NookDesign.Motion.spring, value: currentDownload?.id)
     }
 }
 
@@ -35,7 +39,6 @@ extension AnyTransition {
 }
 
 struct CircularProgressView: View {
-    @Environment(\.colorScheme) var colorScheme
     let progress: Double
 
     var body: some View {
@@ -44,27 +47,27 @@ struct CircularProgressView: View {
                 .fill(.clear)
                 .frame(width: 20, height: 20)
             Image(systemName: "arrow.down")
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(Color(hex: colorScheme == .dark ? "FFFFFF" : "0F2B1F"))
+                .font(NookDesign.Font.caption)
+                .foregroundStyle(Color.primary)
                 .frame(width: 20, height: 20)
 
             Circle()
                 .stroke(
-                    Color(hex: colorScheme == .dark ? "FFFFFF" : "0F2B1F").opacity(0.4),
+                    Color.secondary.opacity(0.4),
                     lineWidth: 4
                 )
                 .frame(width: 20, height: 20)
             Circle()
                 .trim(from: 0, to: progress)
                 .stroke(
-                    Color(hex: colorScheme == .dark ? "FFFFFF" : "0F2B1F"),
+                    Color.primary,
                     style: StrokeStyle(
                         lineWidth: 3,
                         lineCap: .round
                     )
                 )
                 .rotationEffect(.degrees(-90))
-                .animation(.easeOut, value: progress)
+                .animation(NookDesign.Motion.standard, value: progress)
                 .frame(width: 20, height: 20)
         }
     }

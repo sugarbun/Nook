@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  NookButtonStyle.swift
 //  Nook
@@ -6,7 +7,9 @@
 //
 
 import SwiftUI
+import NookDesign
 import Garnish
+import NookUI
 
 struct NookButtonStyle: ButtonStyle {
     @Environment(\.colorScheme) var colorScheme
@@ -21,7 +24,7 @@ struct NookButtonStyle: ButtonStyle {
 
     // MARK: - Constants
 
-    private let cornerRadius: CGFloat = 14
+    private let cornerRadius: CGFloat = NookDesign.Radius.lg
     private let verticalPadding: CGFloat = 12
     private let horizontalPadding: CGFloat = 12
 
@@ -60,8 +63,6 @@ struct NookButtonStyle: ButtonStyle {
             let baseColor = backgroundColor()
             let contrastingShade = contrastingTextColor(for: baseColor)
             let backgroundWithHover = baseColor.mix(with: contrastingShade, by: isHovering ? hoverMixAmount : 0)
-            let shadowColor = shadowColorForBackground(baseColor)
-            let highlightColor = highlightColorForBackground(baseColor)
 
             // Main button label with background
             configuration.label
@@ -70,13 +71,13 @@ struct NookButtonStyle: ButtonStyle {
                 .padding(.vertical, verticalPadding)
                 .padding(.horizontal, horizontalPadding)
                 .background(backgroundWithHover)
-                .clipShape(.rect(cornerRadius: cornerRadius))
+                .clipShape(NookDesign.Radius.shape(cornerRadius))
         }
         .compositingGroup()
         .opacity(isEnabled ? 1.0 : disabledOpacity)
-        .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
-        .animation(.easeInOut(duration: 0.15), value: isHovering)
-        .onHover { hovering in
+        .animation(NookDesign.Motion.quick, value: configuration.isPressed)
+        .animation(NookDesign.Motion.quick, value: isHovering)
+        .onHoverTracking { hovering in
             isHovering = hovering
         }
     }
@@ -85,30 +86,12 @@ struct NookButtonStyle: ButtonStyle {
 
     /// Returns the contrasting text color for the given background
     private func contrastingTextColor(for background: Color) -> Color {
-        (try? Garnish.contrastingShade(
+        Garnish.contrastingShade(
             of: background,
             targetRatio: 2,
             direction: .preferLight,
             blendStyle: .strong
-        )) ?? textColor
-    }
-
-    /// Returns the shadow color for the given background
-    private func shadowColorForBackground(_ background: Color) -> Color {
-        (try? Garnish.contrastingShade(
-            of: background,
-            targetRatio: 1.5,
-            direction: .forceDark
-        )) ?? textColor
-    }
-
-    /// Returns the highlight color for the given background
-    private func highlightColorForBackground(_ background: Color) -> Color {
-        (try? Garnish.contrastingShade(
-            of: background,
-            targetRatio: 2,
-            direction: .preferLight
-        )) ?? textColor
+        ) ?? textColor
     }
 
     /// Returns the highlight opacity based on button state
@@ -148,7 +131,7 @@ struct NookButtonStyle: ButtonStyle {
             return Color.white.mix(with: .black, by: colorScheme == .dark ? 0.8 : 0.06).opacity(0.7)
         case .primary:
             // Use accent color from gradient manager
-            return gradientColorManager.primaryColor
+            return gradientColorManager.accentColor
         }
     }
 
@@ -160,6 +143,21 @@ struct NookButtonStyle: ButtonStyle {
         case .primary:
             return Color.white
         }
+    }
+}
+
+// MARK: - Scale Button Style
+
+struct ScaleButtonStyle: ButtonStyle {
+    var scale: CGFloat = 0.95
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? scale : 1.0)
+            .animation(
+                NookDesign.Motion.quick,
+                value: configuration.isPressed
+            )
     }
 }
 
@@ -210,7 +208,7 @@ private struct ButtonPreviewSection: View {
         }
         .padding()
         .background(.background.opacity(0.5))
-        .cornerRadius(12)
+        .clipShape(NookDesign.Radius.shape(NookDesign.Radius.lg))
         .environmentObject(makeColorManager())
     }
 
@@ -235,28 +233,23 @@ private struct ButtonPreviewSection: View {
     private var buttonStack: some View {
         VStack(spacing: 20) {
             Button("Create Space", systemImage: "plus") {
-                print("Create")
             }
             .buttonStyle(.nookButtonProminent)
             .background(.red)
 
             Button("Cancel") {
-                print("Cancel")
             }
             .buttonStyle(.nookButton)
 
             Button("Delete", systemImage: "trash") {
-                print("Delete")
             }
             .buttonStyle(.nookButton(role: .destructive))
 
             Button("Erase Everything", systemImage: "flame") {
-                print("Erase")
             }
             .buttonStyle(.nookButtonProminent(role: .destructive))
 
             Button("Disabled") {
-                print("Disabled")
             }
             .buttonStyle(.nookButtonProminent)
             .disabled(true)

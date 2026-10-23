@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  Arc.swift
 //  Nook
@@ -6,7 +7,6 @@
 //
 
 import Foundation
-import Combine
 
 // MARK: - JSON Models
 struct SidebarData: Codable {

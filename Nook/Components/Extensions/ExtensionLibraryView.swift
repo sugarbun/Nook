@@ -1,0 +1,515 @@
+// Licensed under GPL-3.0. See LICENSE.
+//
+//  ExtensionLibraryView.swift
+//  Nook
+//
+
+import AppKit
+import os
+import SwiftUI
+import WebKit
+
+import NookBlocker
+import NookDesign
+import NookSettings
+import NookWeb
+import NookUI
+
+struct ExtensionLibraryView: View {
+    let browserManager: BrowserManager
+    let windowState: BrowserWindowState
+    let settings: NookSettingsService
+    let onDismiss: () -> Void
+    let onShowMoreMenu: () -> Void
+
+
+    private let logger = Logger(subsystem: "com.nook.browser", category: "ExtensionLibrary")
+
+    private var currentTab: PageSession? {
+        browserManager.tabs.selectedSession(in: windowState)
+    }
+
+    private var currentHost: String? {
+        currentTab?.url.host
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // MARK: - Utility Buttons
+            utilityButtonsSection
+
+            Divider().opacity(0.15)
+
+            // MARK: - Extensions Grid
+            extensionsSection
+
+            Divider().opacity(0.15)
+
+            // MARK: - Site Settings
+            siteSettingsSection
+
+            // MARK: - Footer
+            footerSection
+        }
+        .frame(width: 300)
+        .background(.clear)
+    }
+
+    // MARK: - Utility Buttons
+
+    private var utilityButtonsSection: some View {
+        HStack(spacing: 6) {
+            CopyButton(icon: "link", label: "Copy Link") {
+                guard let url = currentTab?.url.absoluteString else { return false }
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(url, forType: .string)
+                return true
+            }
+            .disabled(currentTab == nil)
+
+            CopyButton(icon: "doc.on.doc", label: "Copy Title") {
+                guard let title = currentTab?.title else { return false }
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(title, forType: .string)
+                return true
+            }
+            .disabled(currentTab == nil)
+
+            MuteButton(tab: currentTab)
+
+            let isPiPActive = currentTab?.hasPiPActive == true
+            UtilityTile(
+                systemImage: isPiPActive ? "pip.exit" : "pip.enter",
+                help: isPiPActive ? "Exit Picture in Picture" : "Enter Picture in Picture"
+            ) {
+                currentTab?.requestPictureInPicture()
+                onDismiss()
+            }
+            .disabled(!(currentTab.map { $0.hasVideoContent || $0.hasPiPActive } ?? false))
+        }
+        .padding(12)
+    }
+
+    // MARK: - Extensions Grid
+
+    private var extensionsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("EXTENSIONS")
+                .font(NookDesign.Font.captionStrong)
+                .foregroundStyle(.secondary.opacity(0.6))
+                .tracking(0.4)
+                .padding(.horizontal, 4)
+
+            let extensions = browserManager.extensionManager?.installedExtensions.filter { $0.isEnabled } ?? []
+
+            ScrollView {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
+                ForEach(extensions, id: \.id) { ext in
+                    ExtensionGridItem(
+                        ext: ext,
+                        isPinned: settings.pinnedExtensionIDs.contains(ext.id),
+                        browserManager: browserManager,
+                        windowState: windowState,
+                        settings: settings
+                    )
+                }
+
+                // Add New button
+                Button {
+                    ExtensionManager.shared.showExtensionInstallDialog()
+                } label: {
+                    VStack(spacing: 5) {
+                        NookDesign.Radius.shape(NookDesign.Radius.md)
+                            .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                            .foregroundStyle(.secondary.opacity(0.2))
+                            .frame(width: 34, height: 34)
+                            .overlay {
+                                Image(systemName: "plus")
+                                    .font(NookDesign.Font.title)
+                                    .foregroundStyle(.secondary.opacity(0.3))
+                            }
+                        Text("Add New")
+                            .font(NookDesign.Font.caption)
+                            .foregroundStyle(.secondary.opacity(0.3))
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+            }
+            .frame(maxHeight: 300)
+        }
+        .padding(12)
+    }
+
+    // MARK: - Site Settings
+
+    @State private var contentBlockerEnabled: Bool = true
+
+    private var siteSettingsSection: some View {
+        VStack(spacing: 2) {
+            // Content Blocker Toggle
+            if let host = currentHost, let tab = currentTab {
+                ContentBlockerSiteRow(session: tab, enabled: $contentBlockerEnabled)
+                    .onChange(of: contentBlockerEnabled) { _, enabled in
+                        // Use currentHost (not captured host) to always reference the active tab
+                        guard let activeHost = currentHost else { return }
+                        // Skip if the state already matches (e.g. during sync from tab switch)
+                        let isAllowed = browserManager.contentBlockerManager.isDomainAllowed(activeHost)
+                        guard (!enabled) != isAllowed else { return }
+                        browserManager.contentBlockerManager.allowDomain(activeHost, allowed: !enabled)
+                    }
+                    .onAppear {
+                        contentBlockerEnabled = !browserManager.contentBlockerManager.isDomainAllowed(host)
+                    }
+                    .onChange(of: currentHost) { _, newHost in
+                        if let h = newHost {
+                            contentBlockerEnabled = !browserManager.contentBlockerManager.isDomainAllowed(h)
+                        }
+                    }
+            }
+
+            // Page Zoom
+            if currentTab != nil {
+                SiteSettingRow(
+                    icon: "magnifyingglass",
+                    iconColor: .blue,
+                    title: "Page Zoom",
+                    subtitle: nil
+                ) {
+                    HStack(spacing: 6) {
+                        Button {
+                            zoomOut()
+                        } label: {
+                            Image(systemName: "minus")
+                                .font(NookDesign.Font.captionStrong)
+                                .frame(width: 22, height: 22)
+                                .background(NookDesign.Surface.fill)
+                                .clipShape(NookDesign.Radius.shape(NookDesign.Radius.xs))
+                        }
+                        .buttonStyle(.plain)
+
+                        Text("\(browserManager.zoomManager.currentZoomPercentage)%")
+                            .font(NookDesign.Font.secondary)
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                            .frame(minWidth: 36)
+
+                        Button {
+                            zoomIn()
+                        } label: {
+                            Image(systemName: "plus")
+                                .font(NookDesign.Font.captionStrong)
+                                .frame(width: 22, height: 22)
+                                .background(NookDesign.Surface.fill)
+                                .clipShape(NookDesign.Radius.shape(NookDesign.Radius.xs))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .padding(12)
+    }
+
+    // MARK: - Footer
+
+    private var footerSection: some View {
+        HStack {
+            HStack(spacing: 5) {
+                Image(systemName: currentTab?.url.scheme == "https" ? "lock.fill" : "lock.open.fill")
+                    .font(NookDesign.Font.caption)
+                    .foregroundStyle(.secondary)
+                Text(currentHost ?? "No site loaded")
+                    .font(NookDesign.Font.secondary)
+                    .foregroundStyle(.primary)
+            }
+
+            Spacer()
+
+            Button {
+                onShowMoreMenu()
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(NookDesign.Font.body)
+            }
+            .buttonStyle(NookIconButtonStyle(size: NookDesign.Size.iconButton, radius: NookDesign.Radius.sm))
+            .foregroundStyle(.primary)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(NookDesign.Surface.fill)
+    }
+
+    // MARK: - Zoom Helpers
+
+    private func zoomIn() {
+        guard let tab = currentTab, let webView = tab.webView else { return }
+        browserManager.zoomManager.zoomIn(for: webView, tabId: tab.itemID)
+    }
+
+    private func zoomOut() {
+        guard let tab = currentTab, let webView = tab.webView else { return }
+        browserManager.zoomManager.zoomOut(for: webView, tabId: tab.itemID)
+    }
+}
+
+// MARK: - Mute Button (reactive to tab state)
+
+private struct MuteButton: View {
+    let tab: PageSession?
+
+    @State private var isMuted = false
+
+    var body: some View {
+        UtilityTile(
+            systemImage: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
+            help: isMuted ? "Unmute" : "Mute"
+        ) {
+            tab?.toggleMute()
+            // Update local state immediately for snappy UI
+            if tab != nil { isMuted.toggle() }
+        }
+        .disabled(tab == nil)
+        .onAppear { isMuted = tab?.isAudioMuted ?? false }
+        .onChange(of: tab?.isAudioMuted) { _, newValue in
+            isMuted = newValue ?? false
+        }
+    }
+}
+
+// MARK: - Copy Button (with checkmark feedback)
+
+private struct CopyButton: View {
+    let icon: String
+    let label: String
+    let action: () -> Bool  // returns true if copy succeeded
+
+    @State private var showCheckmark = false
+
+    var body: some View {
+        UtilityTile(
+            systemImage: showCheckmark ? "checkmark" : icon,
+            help: showCheckmark ? "Copied!" : label,
+            tint: showCheckmark ? .green : .primary
+        ) {
+            if action() {
+                withAnimation(NookDesign.Motion.quick) {
+                    showCheckmark = true
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                    withAnimation(NookDesign.Motion.quick) {
+                        showCheckmark = false
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Utility Tile
+
+/// Sized and filled like a favorites tile, icon only; the name is the tooltip.
+private struct UtilityTile: View {
+    let systemImage: String
+    let help: String
+    var tint: Color = .primary
+    let action: () -> Void
+
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(NookDesign.Font.title)
+                .foregroundStyle(isEnabled ? AnyShapeStyle(tint) : AnyShapeStyle(.tertiary))
+                .contentTransition(.symbolEffect(.replace))
+                .frame(maxWidth: .infinity)
+                .frame(height: NookDesign.Size.essentialsTile)
+                .background(
+                    isHovering && isEnabled ? NookDesign.Surface.fillPressed : NookDesign.Surface.fill,
+                    in: NookDesign.Radius.shape(NookDesign.Radius.lg)
+                )
+                .contentShape(NookDesign.Radius.shape(NookDesign.Radius.lg))
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(help)
+        .onHoverTracking { isHovering = $0 }
+    }
+}
+
+// MARK: - Extension Grid Item
+
+private struct ExtensionGridItem: View {
+    let ext: InstalledExtension
+    let isPinned: Bool
+    let browserManager: BrowserManager
+    let windowState: BrowserWindowState
+    let settings: NookSettingsService
+
+    @State private var isHovering = false
+    @State private var badgeText: String?
+
+    private var currentTab: PageSession? {
+        browserManager.tabs.selectedSession(in: windowState)
+    }
+
+    var body: some View {
+        Button {
+            triggerExtensionAction()
+        } label: {
+            VStack(spacing: 5) {
+                ZStack(alignment: .topTrailing) {
+                    Group {
+                        if let iconPath = ext.iconPath,
+                           let nsImage = NSImage(contentsOfFile: iconPath) {
+                            Image(nsImage: nsImage)
+                                .resizable()
+                                .interpolation(.high)
+                                .antialiased(true)
+                                .scaledToFit()
+                        } else {
+                            Image(systemName: "puzzlepiece.extension")
+                                .font(NookDesign.Font.title)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(width: 34, height: 34)
+                    .background(NookDesign.Surface.fill)
+                    .clipShape(NookDesign.Radius.shape(NookDesign.Radius.md))
+
+                    if let badge = badgeText, !badge.isEmpty {
+                        Text(badge)
+                            .font(NookDesign.Font.micro)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Color.red)
+                            .clipShape(Capsule())
+                            .offset(x: 4, y: -4)
+                    }
+
+                }
+
+                Text(ext.name)
+                    .font(NookDesign.Font.caption)
+                    .foregroundStyle(.secondary.opacity(0.7))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: 72)
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 4)
+            .frame(maxWidth: .infinity)
+            .background(isHovering ? NookDesign.Surface.fill : Color.clear)
+            .clipShape(NookDesign.Radius.shape(NookDesign.Radius.md))
+            .overlay(alignment: .topTrailing) {
+                if isPinned {
+                    Image(systemName: "pin.fill")
+                        .font(NookDesign.Font.caption)
+                        .foregroundStyle(Color.blue.opacity(0.8))
+                        .rotationEffect(.degrees(45))
+                        .padding(4)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .onHoverTracking { isHovering = $0 }
+        .onAppear { refreshBadge() }
+        .contextMenu {
+            if isPinned {
+                Button("Unpin from URL Bar") {
+                    settings.pinnedExtensionIDs.removeAll { $0 == ext.id }
+                }
+            } else {
+                Button("Pin to URL Bar") {
+                    settings.pinnedExtensionIDs.append(ext.id)
+                }
+            }
+        }
+        .accessibilityLabel(ext.name)
+        .accessibilityHint("Extension. Double-tap to activate.")
+        .accessibilityAddTraits(.isButton)
+    }
+
+    private func triggerExtensionAction() {
+        guard let ctx = ExtensionManager.shared.getExtensionContext(for: ext.id) else { return }
+
+        if ctx.webExtension.hasBackgroundContent {
+            ctx.loadBackgroundContent { error in
+                if let error { Logger(subsystem: "com.nook.browser", category: "ExtensionLibrary").error("Background wake failed: \(error.localizedDescription, privacy: .public)") }
+            }
+        }
+
+        let adapter = ExtensionManager.shared.actionAdapter(in: windowState)
+        ctx.performAction(for: adapter)
+    }
+
+    private func refreshBadge() {
+        guard let ctx = ExtensionManager.shared.getExtensionContext(for: ext.id) else {
+            badgeText = nil
+            return
+        }
+        let adapter = ExtensionManager.shared.actionAdapter(in: windowState)
+        badgeText = ctx.action(for: adapter)?.badgeText
+    }
+}
+
+// MARK: - Site Setting Row
+
+private struct ContentBlockerSiteRow: View {
+    let session: PageSession
+    @Binding var enabled: Bool
+
+    private var subtitle: String {
+        enabled ? "Enabled" : "Disabled for this site"
+    }
+
+    var body: some View {
+        SiteSettingRow(icon: "shield.checkered", iconColor: .green, title: "Content Blocker", subtitle: subtitle) {
+            Toggle("", isOn: $enabled)
+                .toggleStyle(NookSwitchToggleStyle())
+        }
+    }
+}
+
+private struct SiteSettingRow<Control: View>: View {
+    let icon: String
+    let iconColor: Color
+    let title: String
+    let subtitle: String?
+    @ViewBuilder let control: () -> Control
+
+    @State private var isHovering = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(NookDesign.Font.body)
+                .foregroundStyle(iconColor)
+                .frame(width: 28, height: 28)
+                .background(iconColor.opacity(0.12))
+                .clipShape(NookDesign.Radius.shape(NookDesign.Radius.sm))
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(NookDesign.Font.body)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(NookDesign.Font.caption)
+                        .foregroundStyle(.secondary.opacity(0.6))
+                }
+            }
+
+            Spacer()
+
+            control()
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 7)
+        .background(isHovering ? NookDesign.Surface.fill : Color.clear)
+        .clipShape(NookDesign.Radius.shape(NookDesign.Radius.md))
+        .onHoverTracking { isHovering = $0 }
+    }
+}

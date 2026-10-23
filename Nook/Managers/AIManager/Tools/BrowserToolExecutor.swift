@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  BrowserToolExecutor.swift
 //  Nook
@@ -8,6 +9,7 @@
 import Foundation
 import OSLog
 import WebKit
+import NookWeb
 
 @MainActor
 class BrowserToolExecutor {
@@ -27,12 +29,31 @@ class BrowserToolExecutor {
         BrowserTools.allTools.filter { enabledTools.contains($0.name) }
     }
 
+    /// Callback for requesting user confirmation before executing dangerous tools.
+    /// Set by AIService to route through the standard approval UI.
+    var confirmationHandler: ((_ toolName: String, _ args: [String: Any]) async -> Bool)?
+
     // MARK: - Execute Tool Call
 
     func execute(_ toolCall: AIToolCall) async throws -> AIToolResult {
         guard let browserManager = browserManager,
               let windowState = windowState else {
             return AIToolResult(toolCallId: toolCall.id, toolName: toolCall.name, content: "Browser not available", isError: true)
+        }
+
+        // SECURITY: executeJavaScript ALWAYS requires user confirmation regardless of execution mode,
+        // because it can run arbitrary code on the current page.
+        if toolCall.name == "executeJavaScript" {
+            if let handler = confirmationHandler {
+                let approved = await handler(toolCall.name, toolCall.arguments)
+                if !approved {
+                    Self.log.warning("User denied executeJavaScript execution")
+                    return AIToolResult(toolCallId: toolCall.id, toolName: toolCall.name, content: "User denied execution of executeJavaScript.", isError: true)
+                }
+            } else {
+                Self.log.error("executeJavaScript called without a confirmation handler — denying by default")
+                return AIToolResult(toolCallId: toolCall.id, toolName: toolCall.name, content: "executeJavaScript requires user confirmation but no confirmation handler is available.", isError: true)
+            }
         }
 
         let result: String
@@ -71,31 +92,48 @@ class BrowserToolExecutor {
 
     // MARK: - Tool Implementations
 
+    private func tabTitle(_ itemID: UUID, in tabs: TabsController) -> String {
+        if let custom = tabs.item(itemID)?.customTitle, !custom.isEmpty { return custom }
+        return tabs.session(for: itemID)?.title ?? tabs.item(itemID)?.displayTitle ?? ""
+    }
+
     private func getWebView(browserManager: BrowserManager, windowState: BrowserWindowState) -> WKWebView? {
-        guard let currentTab = browserManager.currentTab(for: windowState) else { return nil }
-        return browserManager.getWebView(for: currentTab.id, in: windowState.id)
+        guard let itemID = windowState.selectedItemID else { return nil }
+        return browserManager.getWebView(for: itemID, in: windowState.id)
+    }
+
+    /// JSON-encodes a string for interpolation into a script. `JSONSerialization` raises an
+    /// ObjC `NSInvalidArgumentException` for a bare string at the top level unless
+    /// `.fragmentsAllowed` is set, and neither `try` nor `try?` catches an ObjC exception:
+    /// it unwinds through the Swift async frames, leaves the main thread's executor tracking
+    /// pointing at a dead stack frame, and the next `MainActor.assumeIsolated` anywhere in the
+    /// app segfaults in `swift_getObjectType`.
+    private func jsLiteral(_ value: String) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed]),
+              let literal = String(data: data, encoding: .utf8) else { return "\"\"" }
+        return literal
+    }
+
+    /// Only web URLs. A file: URL would load with read access to its directory, and the
+    /// read tools never prompt, so a page could have a local file read and sent elsewhere.
+    private func webURL(_ string: String) -> URL? {
+        guard let url = URL(string: string),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else { return nil }
+        return url
     }
 
     private func executeNavigateToURL(_ args: [String: Any], browserManager: BrowserManager, windowState: BrowserWindowState) async throws -> String {
         guard let urlString = args["url"] as? String,
-              let url = URL(string: urlString) else {
-            return "Invalid URL"
+              let url = webURL(urlString) else {
+            return "Invalid URL: only http and https URLs are allowed"
         }
 
         let newTab = args["newTab"] as? Bool ?? false
 
-        if newTab {
-            browserManager.createNewTab(in: windowState)
-            // Give the new tab a moment to initialize
-            try await Task.sleep(nanoseconds: 100_000_000)
-        }
-
-        guard let webView = getWebView(browserManager: browserManager, windowState: windowState) else {
+        guard browserManager.tabs.open(url: url, in: windowState, placement: newTab ? .newTab : .replaceCurrent) != nil else {
             return "No active tab"
         }
-
-        let request = URLRequest(url: url)
-        webView.load(request)
 
         return "Navigated to \(urlString)\(newTab ? " in new tab" : "")"
     }
@@ -110,9 +148,10 @@ class BrowserToolExecutor {
 
         let script: String
         if let selector = selector {
+            let selectorJSON = jsLiteral(selector)
             script = """
             (function() {
-                const el = document.querySelector('\(selector.replacingOccurrences(of: "'", with: "\\'"))');
+                const el = document.querySelector(\(selectorJSON));
                 if (!el) return { error: 'Element not found' };
                 return {
                     title: document.title,
@@ -155,11 +194,12 @@ class BrowserToolExecutor {
 
         // Support clicking by CSS selector OR by visible text
         if let selector = args["selector"] as? String, !selector.isEmpty {
-            let escapedSelector = selector.replacingOccurrences(of: "'", with: "\\'")
+            let selectorJSON = jsLiteral(selector)
             let script = """
             (function() {
-                const el = document.querySelector('\(escapedSelector)');
-                if (!el) return 'Element not found: \(escapedSelector)';
+                const sel = \(selectorJSON);
+                const el = document.querySelector(sel);
+                if (!el) return 'Element not found: ' + sel;
                 el.scrollIntoView({block: 'center'});
                 el.click();
                 return 'Clicked element: ' + (el.textContent || '').substring(0, 100).trim();
@@ -168,13 +208,10 @@ class BrowserToolExecutor {
             let result = try await webView.evaluateJavaScript(script)
             return result as? String ?? "Click executed"
         } else if let text = args["text"] as? String, !text.isEmpty {
-            let escapedText = text
-                .replacingOccurrences(of: "\\", with: "\\\\")
-                .replacingOccurrences(of: "'", with: "\\'")
-                .replacingOccurrences(of: "\n", with: "\\n")
+            let textJSON = jsLiteral(text)
             let script = """
             (function() {
-                const query = '\(escapedText)'.toLowerCase();
+                const query = \(textJSON).toLowerCase();
                 const candidates = document.querySelectorAll('a, button, input[type="submit"], input[type="button"], [role="button"], [onclick], [tabindex]');
                 let best = null;
                 let bestScore = Infinity;
@@ -212,13 +249,11 @@ class BrowserToolExecutor {
 
         let filter = args["filter"] as? String ?? ""
         let limit = args["limit"] as? Int ?? 50
-        let escapedFilter = filter
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "'", with: "\\'")
+        let filterJSON = jsLiteral(filter)
 
         let script = """
         (function() {
-            const filter = '\(escapedFilter)'.toLowerCase();
+            const filter = \(filterJSON).toLowerCase();
             const limit = \(limit);
             const selectors = 'a[href], button, input, select, textarea, [role="button"], [role="link"], [role="menuitem"], [onclick], [tabindex]';
             const elements = document.querySelectorAll(selectors);
@@ -372,41 +407,42 @@ class BrowserToolExecutor {
             return "No active tab"
         }
 
-        let escapedQuery = query.replacingOccurrences(of: "'", with: "\\'").replacingOccurrences(of: "\\", with: "\\\\")
+        // The query goes in as an argument. Interpolating it meant JSON-encoding a
+        // bare String, which JSONSerialization rejects as an invalid top-level type
+        // by raising an ObjC exception rather than returning an error.
         let script = """
-        (function() {
-            const text = document.body.innerText;
-            const query = '\(escapedQuery)'.toLowerCase();
-            const matches = [];
-            let idx = text.toLowerCase().indexOf(query);
-            while (idx !== -1 && matches.length < 10) {
-                const start = Math.max(0, idx - 50);
-                const end = Math.min(text.length, idx + query.length + 50);
-                matches.push({ index: idx, context: text.substring(start, end) });
-                idx = text.toLowerCase().indexOf(query, idx + 1);
-            }
-            return JSON.stringify({ count: matches.length, matches: matches });
-        })();
+        const text = document.body.innerText;
+        const needle = query.toLowerCase();
+        const hay = text.toLowerCase();
+        const matches = [];
+        let idx = needle ? hay.indexOf(needle) : -1;
+        while (idx !== -1 && matches.length < 10) {
+            const start = Math.max(0, idx - 50);
+            const end = Math.min(text.length, idx + needle.length + 50);
+            matches.push({ index: idx, context: text.substring(start, end) });
+            idx = hay.indexOf(needle, idx + needle.length);
+        }
+        return JSON.stringify({ count: matches.length, matches: matches });
         """
 
-        let result = try await webView.evaluateJavaScript(script)
+        let result = try await webView.callAsyncJavaScript(script, arguments: ["query": query], contentWorld: .page)
         return result as? String ?? "No matches found"
     }
 
     private func executeGetTabList(browserManager: BrowserManager, windowState: BrowserWindowState) -> String {
-        guard let tabManager = windowState.tabManager,
-              let space = windowState.currentSpace else {
+        let controller = browserManager.tabs
+        let order = controller.displayOrder(in: windowState)
+        guard !order.isEmpty else {
             return "No tabs available"
         }
 
-        let tabs = tabManager.tabs(in: space)
         var tabList: [[String: Any]] = []
-        for (index, tab) in tabs.enumerated() {
+        for (index, itemID) in order.enumerated() {
             tabList.append([
                 "index": index,
-                "title": tab.name,
-                "url": tab.url.absoluteString,
-                "isActive": tab.id == windowState.currentTabId
+                "title": tabTitle(itemID, in: controller),
+                "url": (controller.session(for: itemID)?.url ?? controller.item(itemID)?.url)?.absoluteString ?? "",
+                "isActive": itemID == windowState.selectedItemID
             ])
         }
 
@@ -419,35 +455,29 @@ class BrowserToolExecutor {
             return "Missing index parameter"
         }
 
-        guard let tabManager = windowState.tabManager,
-              let space = windowState.currentSpace else {
+        let controller = browserManager.tabs
+        let order = controller.displayOrder(in: windowState)
+        guard !order.isEmpty else {
             return "No tabs available"
         }
-
-        let tabs = tabManager.tabs(in: space)
-        guard index >= 0, index < tabs.count else {
-            return "Tab index \(index) out of range (0-\(tabs.count - 1))"
+        guard order.indices.contains(index) else {
+            return "Tab index \(index) out of range (0-\(order.count - 1))"
         }
 
-        let tab = tabs[index]
-        tabManager.setActiveTab(tab)
-        return "Switched to tab: \(tab.name)"
+        controller.select(index: index, in: windowState)
+        return "Switched to tab: \(tabTitle(order[index], in: controller))"
     }
 
     private func executeCreateTab(_ args: [String: Any], browserManager: BrowserManager, windowState: BrowserWindowState) throws -> String {
-        browserManager.createNewTab(in: windowState)
-
-        if let urlString = args["url"] as? String,
-           let url = URL(string: urlString) {
-            // Load URL in the new tab after a brief delay for initialization
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 200_000_000)
-                if let webView = self.getWebView(browserManager: browserManager, windowState: windowState) {
-                    webView.load(URLRequest(url: url))
-                }
+        if let urlString = args["url"] as? String, !urlString.isEmpty {
+            guard let url = webURL(urlString) else {
+                return "Invalid URL: only http and https URLs are allowed"
             }
+            browserManager.tabs.open(url: url, in: windowState, placement: .newTab)
             return "Created new tab with URL: \(urlString)"
         }
+
+        browserManager.tabs.open(url: TabsController.homeURL, in: windowState, placement: .newTab)
 
         return "Created new empty tab"
     }

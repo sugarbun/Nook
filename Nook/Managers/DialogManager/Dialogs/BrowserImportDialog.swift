@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  BrowserImportDialog.swift
 //  Nook
@@ -52,7 +53,6 @@ struct BrowserImportDialog: DialogPresentable {
     }
 
     private func handleCreate() {
-        browserManager.importArcData()
         onCancel()
     }
 }

@@ -1,47 +1,13 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  MCPModels.swift
 //  Nook
 //
-//  MCP (Model Context Protocol) data models
+//  Runtime MCP (Model Context Protocol) types: tools, connection state and the
+//  JSON-RPC wire format. The persisted MCPServerConfig lives in NookSettings.
 //
 
 import Foundation
-
-// MARK: - MCP Server Configuration
-
-enum MCPTransportType: Codable, Equatable {
-    case stdio(command: String, args: [String])
-    case sse(url: String)
-
-    var displayName: String {
-        switch self {
-        case .stdio: return "Stdio"
-        case .sse: return "SSE"
-        }
-    }
-}
-
-struct MCPServerConfig: Codable, Identifiable, Equatable {
-    let id: String
-    var name: String
-    var transport: MCPTransportType
-    var envVars: [String: String]
-    var isEnabled: Bool
-
-    init(
-        id: String = UUID().uuidString,
-        name: String,
-        transport: MCPTransportType,
-        envVars: [String: String] = [:],
-        isEnabled: Bool = true
-    ) {
-        self.id = id
-        self.name = name
-        self.transport = transport
-        self.envVars = envVars
-        self.isEnabled = isEnabled
-    }
-}
 
 // MARK: - MCP Tool
 

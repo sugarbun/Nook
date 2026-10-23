@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  ExtensionBridge.swift
 //  Nook
@@ -7,13 +8,20 @@
 
 import AppKit
 import Foundation
+import os
 import WebKit
+import NookTabsCore
+import NookWeb
 
-@available(macOS 15.4, *)
+/// One regular browser window. Private windows never get an adapter.
 final class ExtensionWindowAdapter: NSObject, WKWebExtensionWindow {
+    let windowID: UUID
+    weak var state: BrowserWindowState?
     private unowned let browserManager: BrowserManager
 
-    init(browserManager: BrowserManager) {
+    init(window: BrowserWindowState, browserManager: BrowserManager) {
+        self.windowID = window.id
+        self.state = window
         self.browserManager = browserManager
         super.init()
     }
@@ -21,64 +29,50 @@ final class ExtensionWindowAdapter: NSObject, WKWebExtensionWindow {
     // MARK: - Window Identity
 
     override func isEqual(_ object: Any?) -> Bool {
-        guard let other = object as? ExtensionWindowAdapter else { return false }
-        return other.browserManager === self.browserManager
+        (object as? ExtensionWindowAdapter)?.windowID == windowID
     }
 
-    override var hash: Int {
-        return ObjectIdentifier(browserManager).hashValue
-    }
+    override var hash: Int { windowID.hashValue }
 
+    private var nsWindow: NSWindow? { state?.window }
+
+    // ponytail: no query cache; displayOrder is cheap and a generation cache missed tree moves.
     func activeTab(for extensionContext: WKWebExtensionContext) -> (any WKWebExtensionTab)? {
-        if let t = browserManager.currentTabForActiveWindow(),
-           let a = ExtensionManager.shared.stableAdapter(for: t) {
-            print("[EXT-BRIDGE] activeTab → '\(t.name)' webView=\(a.tab.isUnloaded ? "nil" : "yes")")
-            return a
+        guard let state else { return nil }
+        let tabs = browserManager.tabs
+        if let front = ExtensionManager.shared.detachedAdapters(in: state).first(where: { $0.isInFront }) {
+            return front
         }
-
-        if let first = browserManager.tabManager.pinnedTabs.first ?? browserManager.tabManager.tabs.first,
-           let a = ExtensionManager.shared.stableAdapter(for: first) {
-            print("[EXT-BRIDGE] activeTab fallback → '\(first.name)'")
-            return a
-        }
-
-        print("[EXT-BRIDGE] activeTab → nil")
-        return nil
+        guard let itemID = tabs.selectedItemID(in: state) ?? tabs.displayOrder(in: state).first else { return nil }
+        return ExtensionManager.shared.adapter(for: itemID)
     }
 
     func tabs(for extensionContext: WKWebExtensionContext) -> [any WKWebExtensionTab] {
-        let all = browserManager.tabManager.pinnedTabs + browserManager.tabManager.tabs
-        let adapters = all.compactMap { ExtensionManager.shared.stableAdapter(for: $0) }
-        let withWebViews = adapters.filter { !$0.tab.isUnloaded }
-        print("[EXT-BRIDGE] tabs → \(adapters.count) total, \(withWebViews.count) with webviews")
-        return adapters
+        guard let state else { return [] }
+        let items = browserManager.tabs.displayOrder(in: state).compactMap { ExtensionManager.shared.adapter(for: $0) }
+        return items + ExtensionManager.shared.detachedAdapters(in: state)
     }
 
     func frame(for extensionContext: WKWebExtensionContext) -> CGRect {
-        if let window = NSApp.mainWindow {
-            return window.frame
-        }
-        return .zero
+        nsWindow?.frame ?? .zero
     }
 
     func screenFrame(for extensionContext: WKWebExtensionContext) -> CGRect {
-        return NSScreen.main?.frame ?? .zero
+        (nsWindow?.screen ?? NSScreen.main)?.frame ?? .zero
     }
 
     func focus(for extensionContext: WKWebExtensionContext, completionHandler: @escaping (Error?) -> Void) {
-        if let window = NSApp.mainWindow {
-            window.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            completionHandler(nil)
-        } else {
-            completionHandler(NSError(domain: "ExtensionWindowAdapter", code: 1, userInfo: [NSLocalizedDescriptionKey: "No window to focus"]))
+        guard let window = nsWindow else {
+            completionHandler(Self.error(1, "No window to focus"))
+            return
         }
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        completionHandler(nil)
     }
 
     func isPrivate(for extensionContext: WKWebExtensionContext) -> Bool {
-        if let currentTab = browserManager.currentTabForActiveWindow() {
-            return currentTab.isEphemeral
-        }
+        // Private windows have no extension controller and are never exposed through this adapter.
         return false
     }
 
@@ -87,94 +81,160 @@ final class ExtensionWindowAdapter: NSObject, WKWebExtensionWindow {
     }
 
     func windowState(for extensionContext: WKWebExtensionContext) -> WKWebExtension.WindowState {
-        guard let window = NSApp.mainWindow else { return .normal }
-        if window.isMiniaturized {
-            return .minimized
-        }
-        if window.styleMask.contains(.fullScreen) {
-            return .fullscreen
-        }
+        guard let window = nsWindow else { return .normal }
+        if window.isMiniaturized { return .minimized }
+        if window.styleMask.contains(.fullScreen) { return .fullscreen }
         return .normal
     }
 
     func setWindowState(_ windowState: WKWebExtension.WindowState, for extensionContext: WKWebExtensionContext, completionHandler: @escaping (Error?) -> Void) {
+        guard let window = nsWindow else {
+            completionHandler(Self.error(4, "No window available"))
+            return
+        }
+
+        switch windowState {
+        case .minimized:
+            window.miniaturize(nil)
+        case .maximized:
+            if window.isMiniaturized {
+                window.deminiaturize(nil)
+            }
+            window.zoom(nil)
+        case .fullscreen:
+            if !window.styleMask.contains(.fullScreen) {
+                window.toggleFullScreen(nil)
+            }
+        case .normal:
+            if window.isMiniaturized {
+                window.deminiaturize(nil)
+            } else if window.styleMask.contains(.fullScreen) {
+                window.toggleFullScreen(nil)
+            }
+        @unknown default:
+            break
+        }
+
         completionHandler(nil)
     }
 
     func setFrame(_ frame: CGRect, for extensionContext: WKWebExtensionContext, completionHandler: @escaping (Error?) -> Void) {
-        if let window = NSApp.mainWindow {
-            window.setFrame(frame, display: true)
-            completionHandler(nil)
-        } else {
-            completionHandler(NSError(domain: "ExtensionWindowAdapter", code: 2, userInfo: [NSLocalizedDescriptionKey: "No window to set frame on"]))
+        guard let window = nsWindow else {
+            completionHandler(Self.error(2, "No window to set frame on"))
+            return
         }
+        window.setFrame(frame, display: true)
+        completionHandler(nil)
     }
 
     func close(for extensionContext: WKWebExtensionContext, completionHandler: @escaping (Error?) -> Void) {
-        if let window = NSApp.mainWindow {
-            window.performClose(nil)
-            completionHandler(nil)
-        } else {
-            completionHandler(NSError(domain: "ExtensionWindowAdapter", code: 3, userInfo: [NSLocalizedDescriptionKey: "No window to close"]))
+        guard let window = nsWindow else {
+            completionHandler(Self.error(3, "No window to close"))
+            return
         }
+        window.performClose(nil)
+        completionHandler(nil)
+    }
+
+    private static func error(_ code: Int, _ message: String) -> NSError {
+        NSError(domain: "ExtensionWindowAdapter", code: code, userInfo: [NSLocalizedDescriptionKey: message])
     }
 }
 
-@available(macOS 15.4, *)
+/// One tab item, keyed by item id. The page session is resolved on each call, so an unloaded
+/// tab keeps the same adapter, and a reopened tab (same id) compares equal to its old adapter.
 final class ExtensionTabAdapter: NSObject, WKWebExtensionTab {
-    internal let tab: Tab
+    let itemID: UUID
     private unowned let browserManager: BrowserManager
 
-    init(tab: Tab, browserManager: BrowserManager) {
-        self.tab = tab
+    /// Set for a Peek or mini window page, which has no item until it is adopted.
+    private weak var detachedPage: PageSession?
+
+    init(itemID: UUID, browserManager: BrowserManager, detachedPage: PageSession? = nil) {
+        self.itemID = itemID
         self.browserManager = browserManager
+        self.detachedPage = detachedPage
         super.init()
     }
 
     // MARK: - Identity (consistent across lookups)
 
     override func isEqual(_ object: Any?) -> Bool {
-        guard let other = object as? ExtensionTabAdapter else { return false }
-        return other.tab.id == self.tab.id
+        (object as? ExtensionTabAdapter)?.itemID == itemID
     }
 
-    override var hash: Int {
-        return tab.id.hashValue
+    override var hash: Int { itemID.hashValue }
+
+    private var tabs: TabsController { browserManager.tabs }
+    private var session: PageSession? { detached ?? tabs.session(for: itemID) }
+
+    /// The page while it is still a Peek or mini window page; nil once adopted as a tab.
+    var detached: PageSession? { detachedPage.flatMap { $0.isDetached ? $0 : nil } }
+
+    /// A detached page is in front when Peek shows it over its window or its mini window is key.
+    var isInFront: Bool {
+        guard let page = detached else { return false }
+        guard let window = page.webView?.window else { return true }
+        return window.isKeyWindow || window.isMainWindow || window === page.detachedWindow?.window
+    }
+
+    /// The window this tab belongs to: the focused window when it shows the tab, else any
+    /// regular window that shows it, else the focused regular window.
+    var hostWindow: BrowserWindowState? {
+        let registry = browserManager.windowRegistry
+        let regular = (registry?.allWindows ?? []).filter { $0.privateTree == nil }
+        let active = registry?.activeWindow.flatMap { $0.privateTree == nil ? $0 : nil }
+        if let page = detached {
+            return page.detachedWindow.flatMap { $0.privateTree == nil ? $0 : nil } ?? active ?? regular.first
+        }
+        let candidates = (active.map { [$0] } ?? []) + regular.filter { $0 !== active }
+        return candidates.first { tabs.displayOrder(in: $0).contains(itemID) } ?? active ?? regular.first
+    }
+
+    private func error(_ code: Int, _ message: String) -> NSError {
+        NSError(domain: "ExtensionTabAdapter", code: code, userInfo: [NSLocalizedDescriptionKey: message])
     }
 
     func url(for extensionContext: WKWebExtensionContext) -> URL? {
-        return tab.url
+        if let session { return session.url }
+        if case .tab(let url, _)? = tabs.item(itemID)?.kind { return url }
+        return nil
     }
 
     func title(for extensionContext: WKWebExtensionContext) -> String? {
-        return tab.name
+        if let session { return session.title }
+        if case .tab(_, let title)? = tabs.item(itemID)?.kind { return title }
+        return nil
     }
 
     func isSelected(for extensionContext: WKWebExtensionContext) -> Bool {
-        return browserManager.currentTabForActiveWindow()?.id == tab.id
+        if detached != nil { return isInFront }
+        return tabs.activeWindowSession?.itemID == itemID
     }
 
     func indexInWindow(for extensionContext: WKWebExtensionContext) -> Int {
-        if browserManager.tabManager.pinnedTabs.contains(where: { $0.id == tab.id }) {
-            return 0
-        }
-        return tab.index
+        guard let window = hostWindow else { return 0 }
+        let order = tabs.displayOrder(in: window)
+        return order.firstIndex(of: itemID) ?? (detached != nil ? order.count : 0)
     }
 
     func isLoadingComplete(for extensionContext: WKWebExtensionContext) -> Bool {
-        return !tab.isLoading
+        !(session?.isLoading ?? false)
     }
 
     func isPinned(for extensionContext: WKWebExtensionContext) -> Bool {
-        return browserManager.tabManager.pinnedTabs.contains(where: { $0.id == tab.id })
+        switch tabs.section(of: itemID) {
+        case .pinned?, .favorites?: return true
+        default: return false
+        }
     }
 
     func isMuted(for extensionContext: WKWebExtensionContext) -> Bool {
-        return tab.isAudioMuted
+        session?.isAudioMuted ?? false
     }
 
     func isPlayingAudio(for extensionContext: WKWebExtensionContext) -> Bool {
-        return tab.hasPlayingAudio
+        session?.hasPlayingAudio ?? false
     }
 
     func isReaderModeActive(for extensionContext: WKWebExtensionContext) -> Bool {
@@ -182,24 +242,40 @@ final class ExtensionTabAdapter: NSObject, WKWebExtensionTab {
     }
 
     func webView(for extensionContext: WKWebExtensionContext) -> WKWebView? {
-        // Use assignedWebView to avoid triggering lazy initialization
-        // Extensions can only interact with tabs that are currently displayed
-        return tab.assignedWebView
+        // The existing view only, never lazy creation. Tabs are registered with the controller
+        // before the compositor assigns a window, so `assignedWebView` would be nil here and
+        // WebKit could not match content script messages to this adapter.
+        session?.webView
     }
 
     func activate(for extensionContext: WKWebExtensionContext, completionHandler: @escaping (Error?) -> Void) {
-        browserManager.tabManager.setActiveTab(tab)
+        if let page = detached {
+            page.webView?.window?.makeKeyAndOrderFront(nil)
+            completionHandler(nil)
+            return
+        }
+        guard let window = hostWindow else {
+            completionHandler(error(2, "No window"))
+            return
+        }
+        tabs.select(itemID, in: window)
         completionHandler(nil)
     }
 
     func close(for extensionContext: WKWebExtensionContext, completionHandler: @escaping (Error?) -> Void) {
-        browserManager.tabManager.removeTab(tab.id)
+        if let page = detached { page.onClose?() } else { tabs.close(itemID) }
         completionHandler(nil)
     }
 
     func reload(fromOrigin: Bool, for extensionContext: WKWebExtensionContext, completionHandler: @escaping (Error?) -> Void) {
-        guard let webView = tab.webView else {
-            completionHandler(NSError(domain: "ExtensionTabAdapter", code: 1, userInfo: [NSLocalizedDescriptionKey: "No webview"]))
+        // An unloaded page reloads by loading its saved URL, without selecting the tab.
+        guard let webView = session?.webView else {
+            guard let page = tabs.ensureSession(for: itemID) else {
+                completionHandler(error(1, "No webview"))
+                return
+            }
+            page.refresh()
+            completionHandler(nil)
             return
         }
         if fromOrigin {
@@ -211,22 +287,36 @@ final class ExtensionTabAdapter: NSObject, WKWebExtensionTab {
     }
 
     func loadURL(_ url: URL, for extensionContext: WKWebExtensionContext, completionHandler: @escaping (Error?) -> Void) {
-        tab.loadURL(url.absoluteString)
+        guard ExtensionManager.extensionMayOpen(url, for: extensionContext) else {
+            completionHandler(error(4, "Extensions cannot open \(url.scheme ?? "this") URLs"))
+            return
+        }
+        // An unloaded tab gets a page (not selected) that loads `url` directly.
+        guard let page = tabs.ensureSession(for: itemID) else {
+            completionHandler(error(3, "Tab is not loaded"))
+            return
+        }
+        if page.isUnloaded {
+            page.url = url
+            page.loadWebViewIfNeeded()
+        } else {
+            page.load(url)
+        }
         completionHandler(nil)
     }
 
     func setMuted(_ muted: Bool, for extensionContext: WKWebExtensionContext, completionHandler: @escaping (Error?) -> Void) {
-        tab.isAudioMuted = muted
+        session?.setMuted(muted)
         completionHandler(nil)
     }
 
     func setZoomFactor(_ zoomFactor: Double, for extensionContext: WKWebExtensionContext, completionHandler: @escaping (Error?) -> Void) {
-        tab.webView?.pageZoom = zoomFactor
+        session?.webView?.pageZoom = zoomFactor
         completionHandler(nil)
     }
 
     func zoomFactor(for extensionContext: WKWebExtensionContext) -> Double {
-        return Double(tab.webView?.pageZoom ?? 1.0)
+        Double(session?.webView?.pageZoom ?? 1.0)
     }
 
     func shouldGrantPermissionsOnUserGesture(for extensionContext: WKWebExtensionContext) -> Bool {
@@ -234,10 +324,6 @@ final class ExtensionTabAdapter: NSObject, WKWebExtensionTab {
     }
 
     func window(for extensionContext: WKWebExtensionContext) -> (any WKWebExtensionWindow)? {
-        let manager = ExtensionManager.shared
-        if manager.windowAdapter == nil {
-            manager.windowAdapter = ExtensionWindowAdapter(browserManager: browserManager)
-        }
-        return manager.windowAdapter
+        hostWindow.flatMap { ExtensionManager.shared.windowAdapter(for: $0) }
     }
 }

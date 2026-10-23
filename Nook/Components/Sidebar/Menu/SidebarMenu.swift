@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  SidebarMenu.swift
 //  Nook
@@ -6,37 +7,16 @@
 //
 
 import SwiftUI
-
-enum Tabs {
-    case history
-    case downloads
-}
-
-public enum SidebarPosition: String, CaseIterable, Identifiable {
-    case left
-    case right
-    public var id: String { rawValue }
-    
-    var displayName: String {
-        switch self {
-        case .left: return "Left"
-        case .right: return "Right"
-        }
-    }
-    
-    var icon: String {
-        switch self {
-        case .left: return "sidebar.left"
-        case .right: return "sidebar.right"
-        }
-    }
-}
+import NookDesign
+import NookWeb
+import NookUI
 
 struct SidebarMenu: View {
-    @State private var selectedTab: Tabs = .history
     @Environment(BrowserWindowState.self) private var windowState
     @EnvironmentObject var browserManager: BrowserManager
     @Environment(\.nookSettings) var nookSettings
+
+    private let tabColumnWidth: CGFloat = 110
 
     var body: some View {
         HStack(alignment: .center, spacing: 0) {
@@ -44,7 +24,7 @@ struct SidebarMenu: View {
                 tabs
             }
             VStack {
-                switch selectedTab {
+                switch windowState.sidebarMenuSelectedTab {
                 case .history:
                     SidebarMenuHistoryTab()
                 case .downloads:
@@ -59,34 +39,28 @@ struct SidebarMenu: View {
         .frame(maxWidth: .infinity)
         .ignoresSafeArea()
     }
-    
+
     var tabs: some View{
         VStack {
-            HStack {
-                MacButtonsView()
-                    .frame(width: 70, height: 20)
-                    .padding(8)
-                Spacer()
-            }
-            
+
             Spacer()
-            VStack(spacing: 20) {
+            VStack(spacing: NookDesign.Spacing.xxl) {
                 SidebarMenuTab(
                     image: "clock",
                     activeImage: "clock.fill",
                     title: "History",
-                    isActive: selectedTab == .history,
+                    isActive: windowState.sidebarMenuSelectedTab == .history,
                     action: {
-                        selectedTab = .history
+                        windowState.sidebarMenuSelectedTab = .history
                     }
                 )
                 SidebarMenuTab(
                     image: "arrow.down.circle",
                     activeImage: "arrow.down.circle.fill",
                     title: "Downloads",
-                    isActive: selectedTab == .downloads,
+                    isActive: windowState.sidebarMenuSelectedTab == .downloads,
                     action: {
-                        selectedTab = .downloads
+                        windowState.sidebarMenuSelectedTab = .downloads
                     }
                 )
             }
@@ -94,24 +68,22 @@ struct SidebarMenu: View {
             Spacer()
             HStack {
                 Button("Back", systemImage: "arrow.backward") {
-                    withAnimation(.easeInOut(duration: 0.2)) {
+                    withAnimation(NookDesign.Motion.standard) {
                         windowState.isSidebarMenuVisible = false
                         let restoredWidth = windowState.savedSidebarWidth
                         windowState.sidebarWidth = restoredWidth
                         windowState.sidebarContentWidth = max(restoredWidth - 16, 0)
                     }
                 }
-                .labelStyle(.iconOnly)
-                .buttonStyle(NavButtonStyle())
-                .foregroundStyle(Color.primary)
+                .nookIconButtons()
                 Spacer()
             }
-            .padding(.leading, 8)
-            .padding(.bottom, 8)
+            .padding(.leading, NookDesign.Spacing.md)
+            .padding(.bottom, NookDesign.Spacing.md)
         }
-        .padding(8)
-        .frame(width: 110)
+        .padding(NookDesign.Spacing.md)
+        .frame(width: tabColumnWidth)
         .frame(maxHeight: .infinity)
-        .background(.black.opacity(0.2))
+        .background(NookDesign.Surface.fill)
     }
 }

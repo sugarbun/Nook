@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  ExtensionUtils.swift
 //  Nook
@@ -27,7 +28,6 @@ struct ExtensionUtils {
     /// Show an alert when extensions are not available on older OS versions
     static func showUnsupportedOSAlert() {
         // This will be implemented when we add alert functionality
-        print("Extensions require iOS 18.5+ or macOS 15.5+")
     }
     
     /// Validate a manifest.json file structure
@@ -64,7 +64,9 @@ enum ExtensionError: LocalizedError {
     case invalidManifest(String)
     case installationFailed(String)
     case permissionDenied
-    
+    /// The user declined the install or update confirmation. Callers should not show an error.
+    case cancelled
+
     var errorDescription: String? {
         switch self {
         case .unsupportedOS:
@@ -75,6 +77,8 @@ enum ExtensionError: LocalizedError {
             return "Installation failed: \(reason)"
         case .permissionDenied:
             return "Permission denied"
+        case .cancelled:
+            return "Installation cancelled"
         }
     }
 }

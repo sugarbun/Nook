@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  SidebarHoverOverlayView.swift
 //  Nook
@@ -6,8 +7,10 @@
 //
 
 import SwiftUI
-import UniversalGlass
 import AppKit
+import NookDesign
+import NookWeb
+import NookUI
 
 struct SidebarHoverOverlayView: View {
     @EnvironmentObject var browserManager: BrowserManager
@@ -16,9 +19,9 @@ struct SidebarHoverOverlayView: View {
     @Environment(CommandPalette.self) private var commandPalette
     @Environment(\.nookSettings) var nookSettings
 
-    private let cornerRadius: CGFloat = 12
-    private let horizontalInset: CGFloat = 7
-    private let verticalInset: CGFloat = 7
+    private let cornerRadius: CGFloat = NookDesign.Radius.lg
+    private let horizontalInset: CGFloat = NookDesign.Spacing.md
+    private let verticalInset: CGFloat = NookDesign.Spacing.md
 
     var body: some View {
         // Only render overlay plumbing when the real sidebar is collapsed
@@ -28,9 +31,9 @@ struct SidebarHoverOverlayView: View {
                 Color.clear
                     .frame(width: hoverManager.triggerWidth)
                     .contentShape(Rectangle())
-                    .onHover { isIn in
+                    .onHoverTracking { isIn in
                         if isIn && !windowState.isSidebarVisible {
-                            withAnimation(.easeInOut(duration: 0.12)) {
+                            withAnimation(NookDesign.Motion.quick) {
                                 hoverManager.isOverlayVisible = true
                             }
                         }
@@ -45,19 +48,8 @@ struct SidebarHoverOverlayView: View {
                         .environment(commandPalette)
                         .environmentObject(browserManager.gradientColorManager)
                         .frame(maxHeight: .infinity)
-                        .background{
-                            
-                            
-                            SpaceGradientBackgroundView()
-                                .environmentObject(browserManager)
-                                .environmentObject(browserManager.gradientColorManager)
-                                .environment(windowState)
-                                .clipShape(.rect(cornerRadius: cornerRadius))
-                            
-                                Rectangle()
-                                    .fill(Color.clear)
-                                    .universalGlassEffect(.regular.tint(Color(.windowBackgroundColor).opacity(0.35)), in: .rect(cornerRadius: cornerRadius))
-                        }
+                        .background(sidebarBackground)
+                        .nookFloatingSurface(in: NookDesign.Radius.shape(cornerRadius))
                         .alwaysArrowCursor()
                         .padding(nookSettings.sidebarPosition == .left ? .leading : .trailing, horizontalInset)
                         .padding(.vertical, verticalInset)
@@ -70,5 +62,12 @@ struct SidebarHoverOverlayView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: nookSettings.sidebarPosition == .left ? .topLeading : .topTrailing)
             // Container remains passive; only overlay/hotspot intercept
         }
+    }
+
+    /// The docked sidebar's own background, so the overlay reads as the same sidebar.
+    private var sidebarBackground: some View {
+        let accent = windowState.isIncognito ? SpaceGradient.incognito.primaryColor : browserManager.gradientColorManager.accentColor
+        return NookDesign.Surface.containerGradient(accent: accent, isActive: true)
+            .overlay(windowState.isIncognito ? NookDesign.Surface.privateTint : Color.clear)
     }
 }

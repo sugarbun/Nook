@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  MediaControlsView.swift
 //  Nook
@@ -6,6 +7,25 @@
 //
 
 import SwiftUI
+import NookDesign
+import NookWeb
+import NookUI
+
+/// Reactive title display that re-renders when the tab's name changes.
+/// Observation tracks the session's title.
+private struct MediaControlsTabTitle: View {
+    let tab: PageSession
+
+    var body: some View {
+        Text(tab.title)
+            .font(NookDesign.Font.secondary)
+            .foregroundStyle(Color.white)
+            .padding(.top, 4)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .leading)))
+    }
+}
 
 struct MediaControlsView: View {
     @EnvironmentObject var browserManager: BrowserManager
@@ -13,7 +33,7 @@ struct MediaControlsView: View {
     @Environment(WindowRegistry.self) private var windowRegistry
     @Environment(\.scenePhase) private var scenePhase
     @State private var hasActiveMedia: Bool = false
-    @State private var activeMediaTab: Tab?
+    @State private var activeMediaTab: PageSession?
     @State private var isHovering: Bool = false
     @State private var overrideIsPlaying: Bool? = nil
     @State private var overrideIsMuted: Bool? = nil
@@ -48,19 +68,20 @@ struct MediaControlsView: View {
         return activeMediaTab?.isAudioMuted == true
     }
 
+    /// The video showing above carries its own controls, so the bar stands down while it is up.
+    /// Read here rather than by the sidebar so this view's own body tracks the change.
+    private var isVideoShowing: Bool {
+        windowState.sidebarPiPController?.isShowing == true
+    }
+
     var body: some View {
         Group {
-            if hasActiveMedia, let tab = activeMediaTab {
+            // The tab just returned to is in view; its bar would pop back for one debounce.
+            if hasActiveMedia, !isVideoShowing, let tab = activeMediaTab, tab.itemID != windowState.selectedItemID {
                 VStack(spacing: 8) {
                     // Tab name (shows on hover)
                     if isHovering {
-                        Text(tab.name)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Color.white)
-                            .padding(.top, 4)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                            .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .leading)))
+                        MediaControlsTabTitle(tab: tab)
                     }
                     HStack(spacing: 0) {
                         // Tab favicon (collapses first)
@@ -69,7 +90,7 @@ struct MediaControlsView: View {
                                 .resizable()
                                 .scaledToFit()
                                 .frame(width: 20, height: 20)
-                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                                .clipShape(NookDesign.Radius.shape(NookDesign.Radius.xs))
                                 .transition(.opacity.combined(with: .scale(scale: 0.8)))
                         }
 
@@ -89,7 +110,7 @@ struct MediaControlsView: View {
                                 }
                             }
                             .labelStyle(.iconOnly)
-                            .buttonStyle(NavButtonStyle())
+                            .buttonStyle(NookIconButtonStyle(size: 24))
                             .foregroundStyle(Color.white)
                             .help("Previous")
                             .transition(.opacity.combined(with: .scale(scale: 0.8)))
@@ -113,7 +134,7 @@ struct MediaControlsView: View {
                             }
                         }
                         .labelStyle(.iconOnly)
-                        .buttonStyle(NavButtonStyle())
+                        .buttonStyle(NookIconButtonStyle(size: 24))
                         .foregroundStyle(Color.white)
                         .help(isPlaying ? "Pause" : "Play")
 
@@ -130,9 +151,19 @@ struct MediaControlsView: View {
                             }
                         }
                         .labelStyle(.iconOnly)
-                        .buttonStyle(NavButtonStyle())
+                        .buttonStyle(NookIconButtonStyle(size: 24))
                         .foregroundStyle(Color.white)
                         .help("Next")
+
+                        Spacer()
+
+                        Button("Return to Tab", systemImage: "arrow.up.forward.app") {
+                            browserManager.tabs.select(tab.itemID, in: windowState)
+                        }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(NookIconButtonStyle(size: 24))
+                        .foregroundStyle(Color.white)
+                        .help("Return to Tab")
 
                         Spacer()
 
@@ -150,35 +181,47 @@ struct MediaControlsView: View {
                             }
                         }
                         .labelStyle(.iconOnly)
-                        .buttonStyle(NavButtonStyle())
+                        .buttonStyle(NookIconButtonStyle(size: 24))
                         .foregroundStyle(Color.white)
                         .help(isMuted ? "Unmute" : "Mute")
+
+                        // Bring the video itself back into the sidebar above this bar.
+                        if tab.hasVideoContent || tab.hasPlayingVideo {
+                            Spacer()
+
+                            Button("Maximize", systemImage: "arrow.up.left.and.arrow.down.right") {
+                                maximize(tab)
+                            }
+                            .labelStyle(.iconOnly)
+                            .buttonStyle(NookIconButtonStyle(size: 24))
+                            .foregroundStyle(Color.white)
+                            .help("Show video in the sidebar")
+                        }
                     }
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
                 .background(
-                    RoundedRectangle(cornerRadius: 10)
+                    NookDesign.Radius.shape(NookDesign.Radius.md)
                         .fill(Color.black)
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10)
+                    NookDesign.Radius.shape(NookDesign.Radius.md)
                         .stroke(Color.white.opacity(0.2), lineWidth: 0.5)
                 )
                 .padding(.horizontal, 8)
                 .frame(maxWidth: .infinity)
-                .onHover { hovering in
-                    withAnimation(.easeInOut(duration: 0.15)) {
+                .onHoverTracking { hovering in
+                    withAnimation(NookDesign.Motion.quick) {
                         isHovering = hovering
                     }
                 }
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
-        .controlSize(.mini)
-        .animation(.easeInOut(duration: 0.25), value: hasActiveMedia)
-        .animation(.easeInOut(duration: 0.2), value: shouldShowFavicon)
-        .animation(.easeInOut(duration: 0.2), value: shouldShowPreviousButton)
+        .animation(NookDesign.Motion.standard, value: hasActiveMedia)
+        .animation(NookDesign.Motion.standard, value: shouldShowFavicon)
+        .animation(NookDesign.Motion.standard, value: shouldShowPreviousButton)
         .onAppear {
             if mediaControlsManager == nil {
                 let manager = MediaControlsManager(browserManager: browserManager, windowState: windowState)
@@ -187,12 +230,19 @@ struct MediaControlsView: View {
             }
             updateMediaState()
         }
-        // Trigger when spaces change (tabs added/removed)
-        .onChange(of: browserManager.tabManager.spaces) { _, _ in
+        // Trigger when pages open or close, or any page starts or stops playing
+        .onChange(of: browserManager.tabs.sessions.count) { _, _ in
+            updateMediaState()
+        }
+        .onChange(of: browserManager.tabs.sessions.contains { $0.hasPlayingAudio || $0.hasPlayingVideo }) { _, _ in
             updateMediaState()
         }
         // Trigger when user switches tabs
-        .onChange(of: windowState.currentTabId) { _, _ in
+        .onChange(of: windowState.selectedItemID) { _, _ in
+            updateMediaState()
+        }
+        // Minimising hands the bar a different page than it was last showing.
+        .onChange(of: windowState.sidebarPiPController?.itemID) { _, _ in
             updateMediaState()
         }
         // Trigger when app becomes active (user switches back to app)
@@ -206,10 +256,20 @@ struct MediaControlsView: View {
             // SwiftUI automatically recomputes shouldShowFavicon and shouldShowPreviousButton
             // when windowState.sidebarWidth changes, so no explicit update needed
         }
-        // Slower fallback timer (10 seconds) - catches edge cases where events don't fire
-        // Tab's JavaScript already checks every 5 seconds, so this is just a safety net
-        .onReceive(Timer.publish(every: 10.0, on: .main, in: .common).autoconnect()) { _ in
-            updateMediaState()
+    }
+
+    /// The counterpart of the video's minimise button. Falls back to system picture-in-picture
+    /// when the video cannot be isolated, or the sidebar is only the hover overlay.
+    private func maximize(_ tab: PageSession) {
+        // Private tabs never report leaving, and another window's tab or PiP would lose its view.
+        guard let controller = windowState.sidebarPiPController, !tab.isPrivate,
+            !browserManager.tabs.isOnScreen(tab.itemID),
+            let webView = browserManager.getWebView(for: tab.itemID, in: windowState.id) ?? tab.assignedWebView
+        else { return }
+        guard windowState.isSidebarVisible else { return PiPManager.shared.setPiP(true, for: tab, webView: webView) }
+        if tab.hasPiPActive { PiPManager.shared.setPiP(false, for: tab, webView: webView) }
+        controller.enter(session: tab, webView: webView, automatic: false) {
+            PiPManager.shared.setPiP(true, for: tab, webView: webView)
         }
     }
 
@@ -234,13 +294,16 @@ struct MediaControlsView: View {
             guard let manager = mediaControlsManager else {
                 return
             }
-            let foundTab = manager.findActiveMediaTab()
+            // A page the sidebar video was just minimised from wins over the manager's own
+            // search, which matches on "is playing" and so skips a paused video and leaves the
+            // previously played one showing.
+            let foundTab = windowState.sidebarPiPController?.barSession ?? manager.findActiveMediaTab()
 
-            var resolvedTab: Tab? = foundTab
+            var resolvedTab: PageSession? = foundTab
 
             if resolvedTab == nil, let current = activeMediaTab,
-               let refreshed = browserManager.tabManager.allTabs().first(where: { $0.id == current.id }) {
-                let isCurrentWindowTab = windowState.currentTabId == refreshed.id
+               let refreshed = browserManager.tabs.session(for: current.itemID) {
+                let isCurrentWindowTab = windowState.selectedItemID == refreshed.itemID
                 if !isCurrentWindowTab {
                     resolvedTab = refreshed
                 }
@@ -249,7 +312,7 @@ struct MediaControlsView: View {
             // IMPORTANT: Media controls only show for BACKGROUND tabs with playing media
             // This is by design - if the user can see the video/player, they don't need sidebar controls
             if let candidate = resolvedTab,
-               windowState.currentTabId == candidate.id {
+               windowState.selectedItemID == candidate.itemID {
                 resolvedTab = nil
             }
 
@@ -259,8 +322,14 @@ struct MediaControlsView: View {
                 hasActiveMedia = hasMedia
             }
 
-            if activeMediaTab?.id != resolvedTab?.id {
+            if activeMediaTab?.itemID != resolvedTab?.itemID {
                 activeMediaTab = resolvedTab
+            }
+
+            // Actively sync title from the webview to catch YouTube SPA title changes
+            // that KVO may have missed or that happened after the last state update
+            if let resolvedTab {
+                await manager.refreshTitle(for: resolvedTab)
             }
 
             if let resolvedTab {

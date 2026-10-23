@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  SidebarUpdateNotification.swift
 //  Nook
@@ -6,6 +7,9 @@
 //
 
 import SwiftUI
+import NookDesign
+import NookWeb
+import NookUI
 
 struct SidebarUpdateNotification: View {
     @EnvironmentObject var browserManager: BrowserManager
@@ -16,6 +20,9 @@ struct SidebarUpdateNotification: View {
     @State private var isExpanded: Bool = false
     @State private var isHovering: Bool = false
     @State private var gradientPhase: Double = 0.0
+
+    // continuous motion, not a state transition
+    private let gradientAnimationDuration: Double = 2.0
 
     private var availability: BrowserManager.UpdateAvailability? {
         if let update = browserManager.updateAvailability {
@@ -45,8 +52,8 @@ struct SidebarUpdateNotification: View {
             VStack(spacing: 0) {
                 VStack(spacing: 0) {
                     Text("New version of Nook available")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.black)
+                        .font(NookDesign.Font.secondary)
+                        .foregroundStyle(.primary)
                         .offset(y: isExpanded ? -25 : 0)
                         .zIndex(2)
 
@@ -55,13 +62,13 @@ struct SidebarUpdateNotification: View {
                             installUpdate(wasDownloaded: availability.isDownloaded)
                         }) {
                             Text("Restart and Update")
-                                .font(.system(size: 12, weight: .semibold))
+                                .font(NookDesign.Font.secondary)
                                 .foregroundColor(.black)
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 6)
                                 .frame(maxWidth: .infinity)
                                 .background(
-                                    RoundedRectangle(cornerRadius: 8)
+                                    NookDesign.Radius.shape(NookDesign.Radius.md)
                                         .fill(
                                             LinearGradient(
                                                 gradient: Gradient(colors: [
@@ -86,26 +93,23 @@ struct SidebarUpdateNotification: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.gray.opacity(0.2))
-                )
+                .nookFloatingSurface(in: NookDesign.Radius.shape(NookDesign.Radius.lg))
                 .frame(maxWidth: .infinity)
-                .onHover { hovering in
+                .onHoverTracking { hovering in
                     isHovering = hovering
-                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                    withAnimation(NookDesign.Motion.spring) {
                         isExpanded = hovering
                     }
                 }
             }
             .opacity(isVisible ? 1 : 0)
             .offset(y: isVisible ? notificationOffset : 50)
-            .animation(.easeOut(duration: 0.3), value: isVisible)
-            .animation(.easeOut(duration: 0.3), value: notificationOffset)
-            .animation(.easeInOut(duration: 0.2), value: isExpanded)
+            .animation(NookDesign.Motion.standard, value: isVisible)
+            .animation(NookDesign.Motion.standard, value: notificationOffset)
+            .animation(NookDesign.Motion.standard, value: isExpanded)
             .onAppear {
                 showNotification()
-                withAnimation(.linear(duration: 2.0).repeatForever(autoreverses: false)) {
+                withAnimation(.linear(duration: gradientAnimationDuration).repeatForever(autoreverses: false)) {
                     gradientPhase = 1.0
                 }
             }

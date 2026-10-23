@@ -1,185 +1,342 @@
-import SwiftUI
+// Licensed under GPL-3.0. See LICENSE.
 import AppKit
+import OSLog
 import WebKit
-
-struct TabCompositorView: NSViewRepresentable {
-    let browserManager: BrowserManager
-    @Environment(BrowserWindowState.self) private var windowState
-    
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        view.wantsLayer = true
-        view.layer?.backgroundColor = NSColor.clear.cgColor
-        return view
-    }
-    
-    func updateNSView(_ nsView: NSView, context: Context) {
-        // Update the compositor when tabs change or compositor version changes
-        updateCompositor(nsView)
-    }
-    
-    private func updateCompositor(_ containerView: NSView) {
-        // Remove all existing webview subviews
-        containerView.subviews.forEach { $0.removeFromSuperview() }
-
-        // Only add the current tab's webView to avoid WKWebView conflicts
-        guard let currentTabId = windowState.currentTabId,
-              let currentTab = browserManager.tabsForDisplay(in: windowState).first(where: { $0.id == currentTabId }),
-              !currentTab.isUnloaded else {
-            return
-        }
-        
-        // Create a window-specific web view for this tab
-        let webView = getOrCreateWebView(for: currentTab, in: windowState.id)
-        webView.frame = containerView.bounds
-        webView.autoresizingMask = [.width, .height]
-        containerView.addSubview(webView)
-        webView.isHidden = false
-    }
-    
-    private func getOrCreateWebView(for tab: Tab, in windowId: UUID) -> WKWebView {
-        // Check if we already have a web view for this tab in this window
-        if let existingWebView = browserManager.getWebView(for: tab.id, in: windowId) {
-            return existingWebView
-        }
-        
-        // Create a new web view for this tab in this window
-        return browserManager.createWebView(for: tab.id, in: windowId)
-    }
-}
+import NookSettings
+import NookTabsCore
+import NookWeb
 
 // MARK: - Tab Compositor Manager
+
+/// Unloads pages no window shows: idle timeout, loaded-page budget, memory pressure and app
+/// backgrounding, per the tab management mode. Visible panes, audible media, picture-in-picture,
+/// capture, pinned tabs and favorites are exempt. A hidden page gives up its back/forward page
+/// cache first, pinned or not.
 @MainActor
 class TabCompositorManager: ObservableObject {
-    private var unloadTimers: [UUID: Timer] = [:]
-    private var lastAccessTimes: [UUID: Date] = [:]
-    
-    // Default unload timeout (5 minutes)
-    var unloadTimeout: TimeInterval = 300
-    
-    init() {
-        // Listen for timeout changes
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleTimeoutChange),
-            name: .tabUnloadTimeoutChanged,
-            object: nil
-        )
-    }
-    
-    deinit {
-        NotificationCenter.default.removeObserver(self)
-    }
-    
-    @objc private func handleTimeoutChange(_ notification: Notification) {
-        if let timeout = notification.userInfo?["timeout"] as? TimeInterval {
-            setUnloadTimeout(timeout)
-        }
-    }
-    
-    func setUnloadTimeout(_ timeout: TimeInterval) {
-        self.unloadTimeout = timeout
-        // Restart timers with new timeout
-        restartAllTimers()
-    }
-    
-    func markTabAccessed(_ tabId: UUID) {
-        lastAccessTimes[tabId] = Date()
-        restartTimer(for: tabId)
-    }
-    
-    func unloadTab(_ tab: Tab) {
-        print("🔄 [Compositor] Unloading tab: \(tab.name)")
-        
-        // Stop any existing timer
-        unloadTimers[tab.id]?.invalidate()
-        unloadTimers.removeValue(forKey: tab.id)
-        lastAccessTimes.removeValue(forKey: tab.id)
-        
-        // Unload the webview
-        tab.unloadWebView()
-    }
-    
-    func loadTab(_ tab: Tab) {
-        print("🔄 [Compositor] Loading tab: \(tab.name)")
-        
-        // Mark as accessed
-        markTabAccessed(tab.id)
-        
-        // Load the webview if needed
-        tab.loadWebViewIfNeeded()
-    }
-    
-    private func restartTimer(for tabId: UUID) {
-        // Cancel existing timer
-        unloadTimers[tabId]?.invalidate()
-        
-        // Create new timer
-        let timer = Timer.scheduledTimer(withTimeInterval: unloadTimeout, repeats: false) { [weak self] _ in
-            Task { @MainActor in
-                self?.handleTabTimeout(tabId)
-            }
-        }
-        unloadTimers[tabId] = timer
-    }
-    
-    private func restartAllTimers() {
-        // Cancel all existing timers
-        unloadTimers.values.forEach { $0.invalidate() }
-        unloadTimers.removeAll()
-        
-        // Restart timers for all accessed tabs
-        for tabId in lastAccessTimes.keys {
-            restartTimer(for: tabId)
-        }
-    }
-    
-    private func handleTabTimeout(_ tabId: UUID) {
-        guard let tab = findTab(by: tabId) else { return }
-        
-        // Don't unload if it's the current tab
-        if tab.id == tabId && tab.isCurrentTab {
-            // Restart timer for current tab
-            restartTimer(for: tabId)
-            return
-        }
-        
-        // Don't unload if tab has playing media
-        if tab.hasPlayingVideo || tab.hasPlayingAudio || tab.hasAudioContent {
-            // Restart timer for tabs with media
-            restartTimer(for: tabId)
-            return
-        }
-        
-        // Unload the tab
-        unloadTab(tab)
-    }
-    
-    private func findTab(by id: UUID) -> Tab? {
-        guard let browserManager = browserManager else { return nil }
-        return browserManager.tabManager.allTabs().first { $0.id == id }
+    private static let log = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "Nook", category: "TabCompositor")
+
+    /// Why a page was unloaded. Logged so the unload policy is observable in a running build:
+    /// without it there is no way to tell "the budget never fired" from "it fired and did nothing".
+    enum EvictionReason: String {
+        case timeout, budget, memoryPressure, background
     }
 
-    private func findTabByWebView(_ webView: WKWebView) -> Tab? {
-        guard let browserManager = browserManager else { return nil }
-        return browserManager.tabManager.allTabs().first { $0.webView === webView }
+    /// Pages currently holding a web view.
+    var loadedCount: Int { tabs?.sessions.filter { !$0.isUnloaded }.count ?? 0 }
+
+    private var unloadTimers: [UUID: Timer] = [:]
+    private var lastAccessTimes: [UUID: Date] = [:]
+    private var memoryPressureSource: DispatchSourceMemoryPressure?
+    private var appResignObserver: Any?
+    private var lastMemoryPressureTime: Date?
+    private var lastMemoryPressureWasCritical = false
+    private var budgetRetryTimer: Timer?
+
+    weak var browserManager: BrowserManager?
+
+    var allowsBackgroundWarming: Bool {
+        !ProcessInfo.processInfo.isLowPowerModeEnabled
+            && (lastMemoryPressureTime.map { Date().timeIntervalSince($0) >= 60 } ?? true)
     }
-    
-    // MARK: - Public Interface
-    func updateTabVisibility(currentTabId: UUID?) {
-        guard let browserManager = browserManager,
-              let coordinator = browserManager.webViewCoordinator else { return }
-        for (windowId, _) in coordinator.compositorContainers() {
-            guard let windowState = browserManager.windowRegistry?.windows[windowId] else { continue }
-            browserManager.refreshCompositor(for: windowState)
+
+    private(set) var mode: TabManagementMode = .standard
+
+    /// How long a page stays off screen before its back/forward page cache goes. Measured at
+    /// 3.5 GB across six tabs after three navigations each, none of it freed by WebKit.
+    private static let pageCacheTrimDelay: TimeInterval = 300
+
+    /// First timer stage: the page cache trim, or the unload when that comes sooner.
+    private var firstStageDelay: TimeInterval { min(Self.pageCacheTrimDelay, mode.unloadTimeout) }
+
+    private var tabs: TabsController? { browserManager?.tabs }
+
+    init() {
+        setupMemoryPressureMonitoring()
+    }
+
+    deinit {
+        memoryPressureSource?.cancel()
+        budgetRetryTimer?.invalidate()
+        unloadTimers.values.forEach { $0.invalidate() }
+        if let observer = appResignObserver {
+            NotificationCenter.default.removeObserver(observer)
         }
     }
-    
-    /// Update tab visibility for a specific window
-    func updateTabVisibility(for windowState: BrowserWindowState) {
-        browserManager?.refreshCompositor(for: windowState)
+
+    // MARK: - Mode Configuration
+
+    func setMode(_ newMode: TabManagementMode) {
+        mode = newMode
+        restartAllTimers()
+        if newMode.unloadsOnBackground {
+            setupBackgroundMonitoring()
+        } else {
+            teardownBackgroundMonitoring()
+        }
+        enforceMaxLoadedTabs()
     }
-    
-    // MARK: - Dependencies
-    weak var browserManager: BrowserManager?
+
+    // MARK: - Access & Loading
+
+    func markTabAccessed(_ itemID: UUID) {
+        lastAccessTimes[itemID] = Date()
+        // The compositor marks the selected page on every SwiftUI update (hover, resize).
+        // A timer rescheduled within the last minute is close enough; handleTimeout re-arms
+        // for any remaining time.
+        if let timer = unloadTimers[itemID], timer.isValid,
+           timer.fireDate.timeIntervalSinceNow > firstStageDelay - 60 {
+            return
+        }
+        restartTimer(for: itemID)
+    }
+
+    /// A page became active through normal selection.
+    ///
+    /// Deliberately does not load the view: the caller is already loading it, and routing through
+    /// `load` would re-enter `setupWebView` before its notify-once guard is set. Only the budget
+    /// work happens here, which is what selection used to skip entirely.
+    func pageActivated(_ itemID: UUID) {
+        markTabAccessed(itemID)
+        if mode.maxLoadedTabs != nil {
+            enforceMaxLoadedTabs()
+        }
+    }
+
+    func load(_ session: PageSession) {
+        markTabAccessed(session.itemID)
+        session.loadWebViewIfNeeded()
+        if mode.maxLoadedTabs != nil {
+            enforceMaxLoadedTabs()
+        }
+    }
+
+    /// Automatic eviction of a page no window shows.
+    private func evict(_ session: PageSession, reason: EvictionReason) {
+        forget(session.itemID)
+        session.unload()
+        Self.log.notice(
+            "evicted: \(reason.rawValue, privacy: .public), loaded now \(self.loadedCount, privacy: .public)")
+    }
+
+    func forget(_ itemID: UUID) {
+        unloadTimers[itemID]?.invalidate()
+        unloadTimers.removeValue(forKey: itemID)
+        lastAccessTimes.removeValue(forKey: itemID)
+    }
+
+    // MARK: - Timer Management
+
+    private func restartTimer(for itemID: UUID, after interval: TimeInterval? = nil) {
+        unloadTimers[itemID]?.invalidate()
+        let timer = Timer.scheduledTimer(withTimeInterval: interval ?? firstStageDelay, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                self?.handleTimeout(itemID)
+            }
+        }
+        // Idle unloads can run late; the slack lets macOS batch the wakeups.
+        timer.tolerance = 60
+        unloadTimers[itemID] = timer
+    }
+
+    private func restartAllTimers() {
+        unloadTimers.values.forEach { $0.invalidate() }
+        unloadTimers.removeAll()
+        for itemID in lastAccessTimes.keys {
+            restartTimer(for: itemID)
+        }
+    }
+
+    private func handleTimeout(_ itemID: UUID) {
+        unloadTimers.removeValue(forKey: itemID)
+        // Closed or already unloaded: nothing to time out until the page is accessed again.
+        guard let session = tabs?.session(for: itemID), !session.isUnloaded else {
+            lastAccessTimes.removeValue(forKey: itemID)
+            return
+        }
+        let idle = lastAccessTimes[itemID].map { Date().timeIntervalSince($0) } ?? mode.unloadTimeout
+        if idle < firstStageDelay - 1 {
+            restartTimer(for: itemID, after: firstStageDelay - idle)
+            return
+        }
+        // Still on screen: look again after another stage, since nothing reports a page leaving.
+        guard tabs?.isOnScreen(itemID) != true else {
+            restartTimer(for: itemID)
+            return
+        }
+        session.clearPageCache()
+        // Pinned tabs and favorites are never unloaded automatically, so re-arming would only
+        // wake the app.
+        if isPinned(itemID) { return }
+
+        let remaining = mode.unloadTimeout - idle
+        if remaining > 1 {
+            restartTimer(for: itemID, after: remaining)
+            return
+        }
+        guard canUnloadInactive(session) else {
+            restartTimer(for: itemID, after: mode.unloadTimeout)
+            return
+        }
+        evict(session, reason: .timeout)
+    }
+
+    // MARK: - Exemptions
+
+    /// Pinned tabs and favorites (the synced sections).
+    private func isPinned(_ itemID: UUID) -> Bool {
+        switch tabs?.section(of: itemID) {
+        case .pinned, .favorites: return true
+        default: return false
+        }
+    }
+
+    /// Shared eligibility for automatic eviction and bulk hidden-page unloading. A user
+    /// unloading one page deliberately bypasses this policy.
+    func canUnloadInactive(_ session: PageSession) -> Bool {
+        guard let tabs, !session.isUnloaded, !tabs.isOnScreen(session.itemID) else { return false }
+        // A silent video nobody can see is not a reason to keep a page: news sites loop muted
+        // clips forever. Audible media and picture-in-picture are.
+        if session.hasPiPActive || session.hasPlayingAudio || session.hasAudioContent {
+            return false
+        }
+        var views = browserManager?.webViewCoordinator?.getAllWebViews(for: session.itemID) ?? []
+        if let primary = session.webView { views.append(primary) }
+        if views.contains(where: { $0.cameraCaptureState != .none || $0.microphoneCaptureState != .none }) {
+            return false
+        }
+        return !isPinned(session.itemID)
+    }
+
+    /// Higher keeps the page longer.
+    private func importance(_ session: PageSession) -> Int {
+        var score = 0
+        if tabs?.isOnScreen(session.itemID) == true { score += 1000 }
+        if session.hasPlayingVideo || session.hasPlayingAudio || session.hasAudioContent { score += 500 }
+        if isPinned(session.itemID) { score += 200 }
+        if let lastAccess = lastAccessTimes[session.itemID] {
+            let minutesAgo = Date().timeIntervalSince(lastAccess) / 60
+            score += max(0, 100 - Int(minutesAgo))
+        }
+        return score
+    }
+
+    // MARK: - Memory Pressure
+
+    private func setupMemoryPressureMonitoring() {
+        let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
+        source.setEventHandler { [weak self, weak source] in
+            // The level is only readable inside the handler.
+            let critical = source?.data.contains(.critical) ?? true
+            Task { @MainActor in
+                self?.handleMemoryPressure(critical: critical)
+            }
+        }
+        source.resume()
+        memoryPressureSource = source
+    }
+
+    private func handleMemoryPressure(critical: Bool) {
+        // Act at most once per 30 seconds, except that a critical event right after a warning
+        // still gets its full response.
+        let now = Date()
+        if let lastTime = lastMemoryPressureTime, now.timeIntervalSince(lastTime) < 30,
+           !critical || lastMemoryPressureWasCritical {
+            return
+        }
+        lastMemoryPressureTime = now
+        lastMemoryPressureWasCritical = critical
+
+        guard let tabs else { return }
+        let sessions = tabs.sessions
+        // Costs nothing the user can see until they press Back, so it goes before any page does.
+        sessions.filter { !tabs.isOnScreen($0.itemID) }.forEach { $0.clearPageCache() }
+        let candidates = sessions.filter(canUnloadInactive).sorted { importance($0) < importance($1) }
+        guard !candidates.isEmpty else { return }
+
+        let count: Int
+        if !critical, mode.memoryPressureKeepCount == nil {
+            // A warning asks for room, so the least important page goes and the rest stay.
+            // Power Saving keeps its keep count at every level.
+            count = 1
+        } else if let keepCount = mode.memoryPressureKeepCount {
+            // Power Saving: unload all but the selected page and keepCount most recent.
+            let loaded = sessions.filter { !$0.isUnloaded }.count
+            count = max(0, loaded - 1 - keepCount)
+        } else {
+            count = Int(ceil(Double(candidates.count) * mode.memoryPressureUnloadFraction))
+        }
+        Self.log.notice(
+            "memory pressure (\(critical ? "critical" : "warning", privacy: .public)): loaded \(self.loadedCount, privacy: .public), evicting \(count, privacy: .public)")
+        candidates.prefix(count).forEach { evict($0, reason: .memoryPressure) }
+    }
+
+    // MARK: - Background Unloading
+
+    private func setupBackgroundMonitoring() {
+        teardownBackgroundMonitoring()
+        appResignObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.handleAppDidResignActive()
+            }
+        }
+    }
+
+    private func teardownBackgroundMonitoring() {
+        if let observer = appResignObserver {
+            NotificationCenter.default.removeObserver(observer)
+            appResignObserver = nil
+        }
+    }
+
+    private func handleAppDidResignActive() {
+        guard mode.unloadsOnBackground, let sessions = tabs?.sessions else { return }
+        sessions.filter(canUnloadInactive).forEach { evict($0, reason: .background) }
+    }
+
+    // MARK: - Loaded Page Budget
+
+    private func enforceMaxLoadedTabs() {
+        budgetRetryTimer?.invalidate()
+        budgetRetryTimer = nil
+        guard let maxTabs = mode.maxLoadedTabs, let sessions = tabs?.sessions else { return }
+
+        // canUnloadInactive already leaves pinned tabs and favorites out of the count.
+        let loaded = sessions.filter(canUnloadInactive)
+        // Logged either way: silence here would be ambiguous between a cap that never binds and
+        // code that never runs, which is exactly what made an earlier measurement useless.
+        Self.log.notice(
+            "budget check: cap \(maxTabs, privacy: .public), unloadable \(loaded.count, privacy: .public), loaded \(self.loadedCount, privacy: .public)")
+        guard loaded.count > maxTabs else { return }
+
+        // Grace period: pages accessed within the last 30 seconds stay.
+        let gracePeriod: TimeInterval = 30
+        let now = Date()
+        let eligible = loaded.filter { session in
+            guard let lastAccess = lastAccessTimes[session.itemID] else { return true }
+            return now.timeIntervalSince(lastAccess) > gracePeriod
+        }
+        let toUnload = eligible.sorted { importance($0) < importance($1) }.prefix(max(0, loaded.count - maxTabs))
+        Self.log.notice(
+            "budget: cap \(maxTabs, privacy: .public), unloadable \(loaded.count, privacy: .public), evicting \(toUnload.count, privacy: .public)")
+        toUnload.forEach { evict($0, reason: .budget) }
+
+        // A burst can exceed the budget while every page is inside its grace period. Retry once
+        // at the next expiry rather than waiting for another user action.
+        if loaded.count - toUnload.count > maxTabs,
+           let nextExpiry = loaded.compactMap({ session -> Date? in
+               guard let accessed = lastAccessTimes[session.itemID] else { return nil }
+               let expiry = accessed.addingTimeInterval(gracePeriod)
+               return expiry > now ? expiry : nil
+           }).min() {
+            budgetRetryTimer = Timer.scheduledTimer(
+                withTimeInterval: max(0.05, nextExpiry.timeIntervalSinceNow), repeats: false
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in self?.enforceMaxLoadedTabs() }
+            }
+        }
+    }
 }

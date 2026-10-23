@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  NookTextField.swift
 //  Nook
@@ -6,6 +7,7 @@
 //
 
 import SwiftUI
+import NookDesign
 
 struct NookTextField: View {
     // MARK: - Types
@@ -43,13 +45,13 @@ struct NookTextField: View {
         HStack(spacing: 12) {
             if let iconName = iconName {
                 Image(systemName: iconName)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(NookDesign.Font.body)
                     .foregroundStyle(iconColor)
                     .frame(width: 16, height: 16)
             }
             
             TextField(placeholder, text: $text)
-                .font(.system(size: 14, weight: .regular))
+                .font(NookDesign.Font.bodyRegular)
                 .foregroundStyle(textColor)
                 .textFieldStyle(PlainTextFieldStyle())
         }
@@ -57,13 +59,13 @@ struct NookTextField: View {
         .padding(.horizontal, 16)
         .background(backgroundColor)
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            NookDesign.Radius.shape(NookDesign.Radius.lg)
                 .stroke(borderColor, lineWidth: borderWidth)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(NookDesign.Radius.shape(NookDesign.Radius.lg))
         .focused($isFocused)
-        .animation(.easeInOut(duration: 0.15), value: isFocused)
-        .animation(.easeInOut(duration: 0.15), value: hasError)
+        .animation(NookDesign.Motion.quick, value: isFocused)
+        .animation(NookDesign.Motion.quick, value: hasError)
         .accessibilityLabel(placeholder)
         .accessibilityHint(hasError ? "Error state" : "Text input field")
     }

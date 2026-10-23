@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  HoverSidebarManager.swift
 //  Nook
@@ -7,6 +8,8 @@
 
 import SwiftUI
 import AppKit
+import NookSettings
+import NookWeb
 
 /// Manages reveal/hide of the overlay sidebar when the real sidebar is collapsed.
 /// Uses a global mouse-move monitor to handle edge hover, including slight overshoot
@@ -75,7 +78,7 @@ final class HoverSidebarManager: ObservableObject {
 
     @MainActor
     private func handleMouseMovementOnMain() {
-        guard let bm = browserManager,
+        guard browserManager != nil,
               let registry = windowRegistry,
               let activeState = registry.activeWindow else { return }
 

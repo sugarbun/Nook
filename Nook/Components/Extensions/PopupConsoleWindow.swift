@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 import AppKit
 import WebKit
 
@@ -76,6 +77,7 @@ final class PopupConsole: NSObject {
                 backing: .buffered,
                 defer: false
             )
+            win.isReleasedWhenClosed = false
             win.title = "Popup Console"
 
             let content = NSView(frame: win.contentLayoutRect)

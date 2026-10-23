@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  FindBarView.swift
 //  Nook
@@ -6,7 +7,8 @@
 //
 
 import SwiftUI
-import UniversalGlass
+import NookDesign
+import NookUI
 
 struct FindBarView: View {
     @ObservedObject var findManager: FindManager
@@ -32,18 +34,18 @@ struct FindBarView: View {
                         HStack(spacing: 6) {
                             Image(systemName: "magnifyingglass")
                                 .foregroundColor(.secondary)
-                                .font(.system(size: 13))
+                                .font(NookDesign.Font.body)
 
                             TextField("Find in page", text: $findManager.searchText)
                                 .textFieldStyle(.plain)
-                                .font(.system(size: 13))
+                                .font(NookDesign.Font.body)
                                 .frame(width: 160)
                                 .focused($isTextFieldFocused)
                                 .onSubmit {
                                     findManager.findNext()
                                 }
                                 .onChange(of: findManager.searchText) { _, newValue in
-                                    findManager.search(for: newValue, in: findManager.currentTab)
+                                    findManager.search(for: newValue, in: findManager.currentSession)
                                 }
                         }
 
@@ -75,15 +77,15 @@ struct FindBarView: View {
                                 findManager.findPrevious()
                             }) {
                                 Image(systemName: "chevron.up")
-                                    .font(.system(size: 11, weight: .medium))
+                                    .font(NookDesign.Font.caption)
                                     .frame(width: 22, height: 22)
                                     .background(isUpButtonHovered ? Color.secondary.opacity(0.2) : Color.clear)
-                                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                                    .clipShape(NookDesign.Radius.shape(NookDesign.Radius.xs))
                             }
                             .buttonStyle(.plain)
                             .disabled(findManager.searchText.isEmpty)
-                            .onHover { hovering in
-                                withAnimation(.easeInOut(duration: 0.1)) {
+                            .onHoverTracking { hovering in
+                                withAnimation(NookDesign.Motion.quick) {
                                     isUpButtonHovered = hovering
                                 }
                             }
@@ -92,15 +94,15 @@ struct FindBarView: View {
                                 findManager.findNext()
                             }) {
                                 Image(systemName: "chevron.down")
-                                    .font(.system(size: 11, weight: .medium))
+                                    .font(NookDesign.Font.caption)
                                     .frame(width: 22, height: 22)
                                     .background(isDownButtonHovered ? Color.secondary.opacity(0.2) : Color.clear)
-                                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                                    .clipShape(NookDesign.Radius.shape(NookDesign.Radius.xs))
                             }
                             .buttonStyle(.plain)
                             .disabled(findManager.searchText.isEmpty)
-                            .onHover { hovering in
-                                withAnimation(.easeInOut(duration: 0.1)) {
+                            .onHoverTracking { hovering in
+                                withAnimation(NookDesign.Motion.quick) {
                                     isDownButtonHovered = hovering
                                 }
                             }
@@ -114,28 +116,21 @@ struct FindBarView: View {
                             findManager.hideFindBar()
                         }) {
                             Image(systemName: "xmark")
-                                .font(.system(size: 11, weight: .medium))
+                                .font(NookDesign.Font.caption)
                                 .frame(width: 22, height: 22)
                                 .background(isCloseButtonHovered ? Color.secondary.opacity(0.2) : Color.clear)
-                                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                                .clipShape(NookDesign.Radius.shape(NookDesign.Radius.xs))
                         }
                         .buttonStyle(.plain)
-                        .onHover { hovering in
-                            withAnimation(.easeInOut(duration: 0.1)) {
+                        .onHoverTracking { hovering in
+                            withAnimation(NookDesign.Motion.quick) {
                                 isCloseButtonHovered = hovering
                             }
                         }
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
-                    // Pill-shaped liquid glass styling
-                    .background(Color(.windowBackgroundColor).opacity(0.35))
-                    .clipShape(Capsule())
-                    .universalGlassEffect(
-                        .regular.tint(Color(.windowBackgroundColor).opacity(0.35)),
-                        in: .capsule
-                    )
-                    .shadow(color: .black.opacity(0.15), radius: 6, x: 0, y: 2)
+                    .nookFloatingSurface(in: NookDesign.Radius.shape(NookDesign.Radius.xl))
                     .padding(.trailing, 16)
                 }
                 .padding(.top, 12)
@@ -148,11 +143,11 @@ struct FindBarView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Liquid Glass dissipate effect for visibility changes
+        // Fade and blur out on hide
         .opacity(findManager.isFindBarVisible ? 1 : 0)
         .blur(radius: findManager.isFindBarVisible ? 0 : 8)
         .allowsHitTesting(findManager.isFindBarVisible)
-        .animation(.smooth(duration: 0.25), value: findManager.isFindBarVisible)
+        .animation(NookDesign.Motion.standard, value: findManager.isFindBarVisible)
         // Focus management
         .onChange(of: findManager.isFindBarVisible) { _, isVisible in
             if isVisible {

@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 import SwiftUI
 
 struct URLBarFramePreferenceKey: PreferenceKey {

@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  WebContextMenu.swift
 //  Nook
@@ -7,157 +8,8 @@
 
 import AppKit
 import WebKit
-
-enum WebContextMenuPayload {
-    case page(url: URL)
-    case textSelection(text: String)
-    case link(url: URL)
-    case image(resource: String)
-    case multiple([WebContextMenuPayload])
-    case ignored
-
-    init?(dictionary: [String: Any]) {
-        guard let rawInvocations = dictionary["invocations"] as? Int,
-              let params = dictionary["parameters"] as? [String: Any]
-        else {
-            return nil
-        }
-
-        var payloads: [WebContextMenuPayload] = []
-        let invocations = Invocation(rawValue: rawInvocations)
-
-        if invocations.contains(.ignored) {
-            self = .ignored
-            return
-        }
-
-        if invocations.contains(.page),
-           let href = dictionary["href"] as? String,
-           let url = WebContextMenuPayload.makeURL(from: href) {
-            payloads.append(.page(url: url))
-        }
-
-        if invocations.contains(.textSelection),
-           let contents = params["contents"] as? String {
-            payloads.append(.textSelection(text: contents))
-        }
-
-        if invocations.contains(.link),
-           let href = params["href"] as? String,
-           let url = WebContextMenuPayload.makeURL(from: href) {
-            payloads.append(.link(url: url))
-        }
-
-        if invocations.contains(.image),
-           let src = params["src"] as? String {
-            payloads.append(.image(resource: src))
-        }
-
-        guard !payloads.isEmpty else { return nil }
-        self = payloads.count == 1 ? payloads[0] : .multiple(payloads)
-    }
-
-    var linkURL: URL? {
-        switch self {
-        case .link(let url):
-            return url
-        case .multiple(let payloads):
-            return payloads.compactMap(\.linkURL).first
-        default:
-            return nil
-        }
-    }
-
-    var imageURL: URL? {
-        switch self {
-        case .image(let resource):
-            return WebContextMenuPayload.makeURLAllowingData(from: resource)
-        case .multiple(let payloads):
-            return payloads.compactMap(\.imageURL).first
-        default:
-            return nil
-        }
-    }
-
-    var imageSourceString: String? {
-        switch self {
-        case .image(let resource):
-            return resource
-        case .multiple(let payloads):
-            return payloads.compactMap(\.imageSourceString).first
-        default:
-            return nil
-        }
-    }
-
-    var textSelection: String? {
-        switch self {
-        case .textSelection(let text):
-            return text
-        case .multiple(let payloads):
-            return payloads.compactMap(\.textSelection).first
-        default:
-            return nil
-        }
-    }
-
-    var pageURL: URL? {
-        switch self {
-        case .page(let url):
-            return url
-        case .multiple(let payloads):
-            return payloads.compactMap(\.pageURL).first
-        default:
-            return nil
-        }
-    }
-
-    var shouldProvideCustomMenu: Bool {
-        switch self {
-        case .ignored:
-            return false
-        default:
-            return true
-        }
-    }
-
-    var containsImage: Bool {
-        switch self {
-        case .image:
-            return true
-        case .multiple(let payloads):
-            return payloads.contains { $0.containsImage }
-        default:
-            return false
-        }
-    }
-
-    private struct Invocation: OptionSet {
-        let rawValue: Int
-        static let page = Invocation(rawValue: 1 << 0)
-        static let textSelection = Invocation(rawValue: 1 << 1)
-        static let link = Invocation(rawValue: 1 << 2)
-        static let image = Invocation(rawValue: 1 << 3)
-        static let ignored = Invocation(rawValue: 1 << 4)
-    }
-
-    private static func makeURL(from string: String) -> URL? {
-        if let url = URL(string: string) {
-            return url
-        }
-        if let encoded = string.addingPercentEncoding(withAllowedCharacters: .urlFragmentAllowed) {
-            return URL(string: encoded)
-        }
-        return nil
-    }
-
-    private static func makeURLAllowingData(from string: String) -> URL? {
-        if string.hasPrefix("data:") {
-            return URL(string: string)
-        }
-        return makeURL(from: string)
-    }
-}
+import NookTabsCore
+import NookWeb
 
 enum WebContextMenuItem {
     case pageBack
@@ -300,7 +152,7 @@ enum WebContextMenuItem {
     @MainActor
     private func isEnabled(context: FocusableWKWebView) -> Bool {
         switch self {
-        case .pageBack: return context.canGoBack
+        case .pageBack: return context.canGoBack || context.owningSession?.canGoBackOrReturn == true
         case .pageForward: return context.canGoForward
         default: return true
         }
@@ -310,13 +162,13 @@ enum WebContextMenuItem {
     private func performAction(on webView: FocusableWKWebView, payload: WebContextMenuPayload) {
         switch self {
         case .pageBack:
-            webView.goBack()
+            if let session = webView.owningSession { session.goBack(in: webView) } else { webView.goBack() }
         case .pageForward:
             webView.goForward()
         case .pageReload:
             webView.reload()
         case .pageCopyAddress:
-            if let url = payload.pageURL ?? webView.owningTab?.url {
+            if let url = payload.pageURL ?? webView.owningSession?.url {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(url.absoluteString, forType: .string)
             }
@@ -373,10 +225,10 @@ final class HandlerMenuItem: NSMenuItem {
 }
 
 extension FocusableWKWebView {
+    /// Opens `url` in the background in the owning page's window and space. A middle click
+    /// on a link takes the same path, so the placement and scheme rules live on the session.
     func openLinkInNewTab(_ url: URL) {
-        guard let browserManager = owningTab?.browserManager else { return }
-        let space = browserManager.tabManager.spaces.first(where: { $0.id == owningTab?.spaceId })
-        _ = browserManager.tabManager.createNewTab(url: url.absoluteString, in: space)
+        owningSession?.openInNewTab(url)
     }
 
     func downloadImage(from url: URL?, promptForLocation: Bool = false) {

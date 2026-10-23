@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  PeekManager.swift
 //  Nook
@@ -5,155 +6,77 @@
 //  Created by Jonathan Caudill on 24/09/2025.
 //
 
-import SwiftUI
-import WebKit
-import AppKit
+import Foundation
+import NookWeb
 
+/// Peek: a link shown in a card over one window, as a detached page that runs like a tab and
+/// becomes one when moved to a tab or split.
 @MainActor
-final class PeekManager: ObservableObject {
-    @Published var isActive: Bool = false
-    @Published var currentSession: PeekSession?
+@Observable
+final class PeekManager {
+    /// The page Peek shows, outside the tab tree until it moves to a tab.
+    private(set) var page: PageSession?
+    /// The window Peek opened in; the others show nothing.
+    private(set) var windowId: UUID?
+    /// The tab Peek was opened from; moving the page to a tab nests it there.
+    @ObservationIgnored private var openerID: UUID?
 
-    weak var browserManager: BrowserManager?
-    weak var windowRegistry: WindowRegistry?
-    var webView: PeekWebView?
-    var webViewCoordinator: PeekWebView.Coordinator?
+    @ObservationIgnored weak var browserManager: BrowserManager?
 
     func attach(browserManager: BrowserManager) {
         self.browserManager = browserManager
     }
 
-    func presentExternalURL(_ url: URL, from tab: Tab?) {
+    func presentExternalURL(_ url: URL, from source: PageSession?) {
         guard let browserManager else { return }
 
-        // Don't show Peek if already showing this URL
-        if currentSession?.currentURL == url {
+        // The same link again closes Peek.
+        if page?.url == url {
             dismissPeek()
             return
         }
 
-        let windowId = windowRegistry?.activeWindow?.id ?? UUID()
-        let session = PeekSession(
-            targetURL: url,
-            sourceTabId: tab?.id,
-            sourceURL: tab?.url,
-            windowId: windowId,
-            sourceProfileId: tab?.resolveProfile()?.id
-        )
+        // A private page never falls back to the default persistent store.
+        guard let source, let profile = source.profile else { return }
+        let window = browserManager.tabs.window(for: source)
 
-        // Create WebView FIRST, then activate
-        currentSession = session
-        let peekWebView = createWebView()
-        self.webView = peekWebView
-        
-        // Defer activation to avoid runloop-mode reentrancy from WebKit delegates
-        RunLoop.current.perform {
-            self.isActive = true
-            NotificationCenter.default.post(name: .peekDidActivate, object: self)
-        }
+        dismissPeek()
+        let page = browserManager.tabs.openDetached(url: url, profile: profile, in: window)
+        page.onClose = { [weak self] in self?.dismissPeek() }
+        self.page = page
+        windowId = window?.id
+        openerID = source.itemID
     }
 
     func dismissPeek() {
-        guard isActive else { return }
-
-        isActive = false
-        webView = nil
-        webViewCoordinator = nil
-
-        NotificationCenter.default.post(name: .peekDidDeactivate, object: self)
-
-        currentSession = nil
+        guard let page else { return }
+        self.page = nil
+        windowId = nil
+        browserManager?.tabs.endDetached(page)
     }
 
-
     func moveToSplitView() {
-        guard let session = currentSession,
-              let browserManager,
-              let windowState = windowRegistry?.activeWindow else { return }
-
-        // Try to get the WebView from coordinator, fall back to creating new WebView if not ready
-        let extractedWebView = webViewCoordinator?.webView
-
-        // Create a new tab with the existing WebView (or create new one if coordinator not ready)
-        let newTab: Tab
-        if let webView = extractedWebView {
-            newTab = browserManager.tabManager.createNewTabWithWebView(
-                url: session.currentURL.absoluteString,
-                in: browserManager.tabManager.currentSpace,
-                existingWebView: webView
-            )
-        } else {
-            // Fallback: create new tab with fresh WebView if coordinator not available yet
-            newTab = browserManager.tabManager.createNewTab(
-                url: session.currentURL.absoluteString,
-                in: browserManager.tabManager.currentSpace
-            )
+        guard let page, let browserManager, let window = page.detachedWindow else { return }
+        let previous = window.selectedItemID
+        self.page = nil
+        windowId = nil
+        guard let itemID = browserManager.tabs.adopt(page, in: window, from: openerID) else { return }
+        // The adopted page is selected; pair it with the page the window showed before.
+        if let previous, previous != itemID {
+            browserManager.tabs.select(previous, in: window)
+            browserManager.splitManager.enterSplit(with: itemID, placeOn: .right, in: window)
         }
-
-        // Enter split view with the new tab using current active window state
-        browserManager.splitManager.enterSplit(with: newTab, placeOn: .right, in: windowState)
-
-        // Activate the new tab using BrowserManager to update window UI state
-        browserManager.selectTab(newTab)
-        dismissPeek()
     }
 
     func moveToNewTab() {
-        guard let session = currentSession,
-              let browserManager,
-              let coordinator = webViewCoordinator else { return }
-
-        // Extract the WebView from the Peek coordinator for transfer
-        let extractedWebView = coordinator.webView
-
-        // Create a new tab with the existing WebView
-        let newTab = browserManager.tabManager.createNewTabWithWebView(
-            url: session.currentURL.absoluteString,
-            in: browserManager.tabManager.currentSpace,
-            existingWebView: extractedWebView
-        )
-
-        // Activate via BrowserManager to ensure full UI updates
-        browserManager.selectTab(newTab)
-        dismissPeek()
-    }
-
-    // MARK: - WebView Management
-
-    func createWebView() -> PeekWebView {
-        // If we already have a WebView, return it (shouldn't happen in normal flow)
-        if let existingWebView = webView {
-            return existingWebView
-        }
-
-        var newWebView = PeekWebView(session: currentSession!)
-        newWebView.peekManager = self
-        return newWebView
-    }
-
-    func updateWebView(_ webView: PeekWebView) {
-        self.webView = webView
-    }
-
-    // MARK: - Helper Methods
-
-    private func isExternalDomain(_ url: URL) -> Bool {
-        guard let currentHost = currentSession?.sourceURL?.host,
-              let newHost = url.host else { return false }
-
-        return currentHost != newHost
+        guard let page, let browserManager, let window = page.detachedWindow else { return }
+        self.page = nil
+        windowId = nil
+        browserManager.tabs.adopt(page, in: window, from: openerID)
     }
 
     var canEnterSplitView: Bool {
-        guard let browserManager,
-              let windowId = currentSession?.windowId else { return false }
-
+        guard let browserManager, let windowId else { return false }
         return !browserManager.splitManager.isSplit(for: windowId)
     }
-}
-
-// MARK: - Notifications
-extension Notification.Name {
-    static let peekDidActivate = Notification.Name("PeekDidActivate")
-    static let peekDidDeactivate = Notification.Name("PeekDidDeactivate")
 }

@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  WebsiteShortcutDetector.swift
 //  Nook
@@ -11,6 +12,7 @@
 
 import Foundation
 import AppKit
+import WebKit
 
 // MARK: - Website Shortcut Detector
 
@@ -29,26 +31,53 @@ class WebsiteShortcutDetector {
     /// Pending shortcut presses waiting for a second press (windowId -> pending info)
     private var pendingShortcuts: [UUID: PendingShortcut] = [:]
     
-    /// Cache of detected shortcuts from JS injection (URL -> Set of lookup keys)
+    /// Cache of detected shortcuts from JS injection (host -> Set of lookup keys)
     private var jsDetectedShortcuts: [String: Set<String>] = [:]
+    /// Hosts in the order they were first cached, so the cache can drop its oldest entry.
+    private var jsDetectedHostOrder: [String] = []
     
     /// The timeout duration for double-press detection (1 second as specified)
     let conflictTimeout: TimeInterval = 1.0
     
-    /// Timer for cleaning up expired pending shortcuts
-    nonisolated(unsafe) private var cleanupTimer: Timer?
-    
     /// Weak reference to browser manager for notifications
     weak var browserManager: BrowserManager?
-    
+
     // MARK: - Initialization
-    
+
+    private let instrumentedWebViews = NSHashTable<WKWebView>.weakObjects()
+    @ObservationIgnored
+    nonisolated(unsafe) private var settingsObserver: NSObjectProtocol?
+    private var detectionEnabled = WebsiteShortcutProfile.isFeatureEnabled
+
     init() {
-        startCleanupTimer()
+        settingsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let enabled = WebsiteShortcutProfile.isFeatureEnabled
+                guard enabled != self.detectionEnabled else { return }
+                self.detectionEnabled = enabled
+                self.jsDetectedShortcuts.removeAll()
+                self.jsDetectedHostOrder.removeAll()
+                self.clearAllPendingShortcuts()
+                for webView in self.instrumentedWebViews.allObjects {
+                    self.configure(webView: webView)
+                }
+            }
+        }
     }
-    
+
     deinit {
-        cleanupTimer?.invalidate()
+        if let settingsObserver { NotificationCenter.default.removeObserver(settingsObserver) }
+    }
+
+    func configure(webView: WKWebView) {
+        instrumentedWebViews.add(webView)
+        let script = WebsiteShortcutProfile.isFeatureEnabled
+            ? Self.jsDetectionScript
+            : "window.__nookStopShortcutDetection?.();"
+        webView.evaluateJavaScript(script, completionHandler: nil)
     }
     
     // MARK: - Public Interface
@@ -62,42 +91,35 @@ class WebsiteShortcutDetector {
         if let url = url {
             let matchedProfile = WebsiteShortcutProfile.knownProfiles.first { $0.matches(url: url) }
             currentProfile = matchedProfile
-            print("⌨️ [Detector] URL updated: \(url.host ?? "nil"), matched profile: \(matchedProfile?.name ?? "none")")
         } else {
             currentProfile = nil
-            print("⌨️ [Detector] URL cleared, no profile")
         }
     }
     
     /// Check if a key combination is a known website shortcut
     /// Returns the website shortcut info if found, nil otherwise
-    func isKnownWebsiteShortcut(_ keyCombination: KeyCombination) -> WebsiteShortcut? {
+    /// `allowPageReports` is false for shortcuts a page's own report must not claim.
+    func isKnownWebsiteShortcut(_ keyCombination: KeyCombination, allowPageReports: Bool = true) -> WebsiteShortcut? {
         guard WebsiteShortcutProfile.isFeatureEnabled else { 
-            print("⌨️ [Detector] Feature disabled, not checking shortcuts")
             return nil 
         }
         
-        print("⌨️ [Detector] Checking shortcut: \(keyCombination.lookupKey)")
-        print("⌨️ [Detector] Current URL: \(currentURL?.host ?? "nil")")
-        print("⌨️ [Detector] Current profile: \(currentProfile?.name ?? "nil")")
         
         // Check known profile first
         if let profile = currentProfile,
            let shortcut = profile.hasShortcut(matching: keyCombination) {
-            print("⌨️ [Detector] ✅ Found matching shortcut in profile: \(profile.name)")
             return shortcut
         }
         
         // Check JS-detected shortcuts
-        if let urlKey = currentURL?.absoluteString,
-           let detectedKeys = jsDetectedShortcuts[urlKey],
+        if allowPageReports,
+           let host = currentURL?.host,
+           let detectedKeys = jsDetectedShortcuts[host],
            detectedKeys.contains(keyCombination.lookupKey) {
-            print("⌨️ [Detector] ✅ Found matching shortcut in JS-detected: \(keyCombination.lookupKey)")
             // Return a generic detected shortcut
             return WebsiteShortcut(key: keyCombination.key, modifiers: keyCombination.modifiers, description: nil)
         }
         
-        print("⌨️ [Detector] ❌ No matching shortcut found")
         return nil
     }
     
@@ -107,18 +129,20 @@ class WebsiteShortcutDetector {
     func shouldPassToWebsite(
         _ keyCombination: KeyCombination,
         windowId: UUID,
-        nookActionName: String
+        nookActionName: String,
+        allowPageReports: Bool
     ) -> Bool {
-        guard WebsiteShortcutProfile.isFeatureEnabled else { 
-            print("⌨️ [Detector] Feature disabled, not passing through")
-            return false 
+        guard WebsiteShortcutProfile.isFeatureEnabled else {
+            return false
         }
-        
-        guard let websiteShortcut = isKnownWebsiteShortcut(keyCombination) else { 
-            print("⌨️ [Detector] No matching website shortcut for: \(keyCombination.lookupKey)")
-            return false 
+
+        guard let websiteShortcut = isKnownWebsiteShortcut(keyCombination, allowPageReports: allowPageReports) else {
+            return false
         }
-        
+
+        // Clean up expired entries on-demand instead of polling
+        cleanupExpiredPendingShortcuts()
+
         let now = Date()
         
         // Check if there's already a pending shortcut for this window
@@ -127,14 +151,12 @@ class WebsiteShortcutDetector {
            now.timeIntervalSince(pending.timestamp) <= conflictTimeout {
             // This is the SECOND press within timeout - clear pending and return false
             // so Nook can capture it
-            print("⌨️ [Detector] SECOND press detected - capturing for Nook")
             pendingShortcuts.removeValue(forKey: windowId)
             return false
         }
         
         // This is the FIRST press - set pending state and show toast
         let websiteName = currentProfile?.name ?? "Website"
-        print("⌨️ [Detector] FIRST press - passing to website: \(websiteName)")
         pendingShortcuts[windowId] = PendingShortcut(
             keyCombination: keyCombination,
             timestamp: now,
@@ -156,6 +178,7 @@ class WebsiteShortcutDetector {
     
     /// Check if there's a pending shortcut for the given window
     func hasPendingShortcut(for windowId: UUID) -> Bool {
+        cleanupExpiredPendingShortcuts()
         guard let pending = pendingShortcuts[windowId] else { return false }
         return Date().timeIntervalSince(pending.timestamp) <= conflictTimeout
     }
@@ -170,23 +193,21 @@ class WebsiteShortcutDetector {
         pendingShortcuts.removeAll()
     }
     
-    /// Update JS-detected shortcuts for a URL
+    /// Update JS-detected shortcuts for a URL's host
     /// Called from Tab when JS injection reports detected listeners
     func updateJSDetectedShortcuts(for url: String, shortcuts: Set<String>) {
-        jsDetectedShortcuts[url] = shortcuts
-    }
-    
-    // MARK: - Private Methods
-    
-    private func startCleanupTimer() {
-        // Clean up expired pending shortcuts every 500ms
-        cleanupTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.cleanupExpiredPendingShortcuts()
+        guard let host = URL(string: url)?.host else { return }
+        // Keyed by host and capped: a single-page app reports under a new URL on every route.
+        if jsDetectedShortcuts.updateValue(shortcuts, forKey: host) == nil {
+            jsDetectedHostOrder.append(host)
+            if jsDetectedHostOrder.count > 200 {
+                jsDetectedShortcuts.removeValue(forKey: jsDetectedHostOrder.removeFirst())
             }
         }
     }
     
+    // MARK: - Private Methods
+
     private func cleanupExpiredPendingShortcuts() {
         let now = Date()
         let expiredWindows = pendingShortcuts.filter { now.timeIntervalSince($0.value.timestamp) > 1.5 }
@@ -237,6 +258,7 @@ extension WebsiteShortcutDetector {
             // Only run once per page
             if (window.__nookShortcutDetectionActive) return;
             window.__nookShortcutDetectionActive = true;
+            let active = true;
             
             // Track detected shortcuts
             const detectedShortcuts = new Set();
@@ -244,7 +266,7 @@ extension WebsiteShortcutDetector {
             // Hook into addEventListener to catch keydown/keyup listeners
             const originalAddEventListener = EventTarget.prototype.addEventListener;
             EventTarget.prototype.addEventListener = function(type, listener, options) {
-                if (type === 'keydown') {
+                if (active && type === 'keydown') {
                     // Try to parse the listener to extract key combinations
                     // This is best-effort and won't catch all cases
                     try {
@@ -276,51 +298,72 @@ extension WebsiteShortcutDetector {
                         // Ignore parsing errors
                     }
                 }
+                if (active && type === 'keydown') scheduleReport();
                 return originalAddEventListener.call(this, type, listener, options);
             };
             
-            // Also try to detect accesskey attributes
-            function checkAccessKeys() {
-                const elements = document.querySelectorAll('[accesskey]');
-                elements.forEach(el => {
-                    const key = el.getAttribute('accesskey')?.toLowerCase();
-                    if (key && key.length === 1) {
-                        detectedShortcuts.add('accesskey:' + key);
-                    }
-                });
+            // Keep only live accesskey nodes, updating changed subtrees rather than
+            // rescanning the entire document for every mutation batch.
+            const accessKeys = new Map();
+            let reportTimer = null;
+            let lastReport = null;
+            function updateNode(node) {
+                if (node.nodeType !== 1) return;
+                const key = node.getAttribute('accesskey')?.toLowerCase();
+                if (node.isConnected && key?.length === 1) accessKeys.set(node, 'accesskey:' + key);
+                else accessKeys.delete(node);
             }
-            
-            // Check accesskeys after DOM loads
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', checkAccessKeys);
-            } else {
-                checkAccessKeys();
+            function scanSubtree(node) {
+                updateNode(node);
+                node.querySelectorAll?.('[accesskey]').forEach(updateNode);
             }
-            
-            // Monitor for dynamic accesskey additions
-            const observer = new MutationObserver(() => checkAccessKeys());
-            observer.observe(document.body || document.documentElement, { 
-                childList: true, 
-                subtree: true,
-                attributes: true,
-                attributeFilter: ['accesskey']
-            });
-            
-            // Report detected shortcuts to native
+            function scheduleReport() {
+                if (reportTimer !== null) return;
+                reportTimer = setTimeout(reportShortcuts, 100);
+            }
             function reportShortcuts() {
-                if (window.webkit?.messageHandlers?.nookShortcutDetect && detectedShortcuts.size > 0) {
-                    window.webkit.messageHandlers.nookShortcutDetect.postMessage(
-                        Array.from(detectedShortcuts).join(',')
-                    );
+                reportTimer = null;
+                const keys = new Set([...detectedShortcuts, ...accessKeys.values()]);
+                const report = Array.from(keys).sort().join(',');
+                if (report !== lastReport) {
+                    lastReport = report;
+                    window.webkit?.messageHandlers?.nookShortcutDetect?.postMessage(report);
                 }
             }
-            
-            // Report periodically and on visibility change
-            setInterval(reportShortcuts, 5000);
-            document.addEventListener('visibilitychange', reportShortcuts);
-            
-            // Initial report after a short delay
-            setTimeout(reportShortcuts, 1000);
+            scanSubtree(document.documentElement);
+            const observer = new MutationObserver(mutations => {
+                let removed = false;
+                for (const mutation of mutations) {
+                    if (mutation.type === 'attributes') updateNode(mutation.target);
+                    else {
+                        mutation.addedNodes.forEach(scanSubtree);
+                        removed ||= mutation.removedNodes.length > 0;
+                    }
+                }
+                if (removed) {
+                    for (const node of accessKeys.keys()) {
+                        if (!node.isConnected) accessKeys.delete(node);
+                    }
+                }
+                scheduleReport();
+            });
+            observer.observe(document.documentElement, {
+                childList: true, subtree: true, attributes: true, attributeFilter: ['accesskey']
+            });
+            const hookedAddEventListener = EventTarget.prototype.addEventListener;
+            window.__nookStopShortcutDetection = function() {
+                window.__nookShortcutDetectionActive = false;
+                active = false;
+                observer.disconnect();
+                clearTimeout(reportTimer);
+                accessKeys.clear();
+                detectedShortcuts.clear();
+                // Preserve wrappers installed by the website after ours.
+                if (EventTarget.prototype.addEventListener === hookedAddEventListener) {
+                    EventTarget.prototype.addEventListener = originalAddEventListener;
+                }
+            };
+            scheduleReport();
         })();
         """
     }

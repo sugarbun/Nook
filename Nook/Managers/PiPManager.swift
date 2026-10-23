@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  PiPManager.swift
 //  Nook
@@ -9,130 +10,64 @@
 import Foundation
 import AppKit
 import WebKit
+import NookWeb
 
 @MainActor
 final class PiPManager: NSObject {
     static let shared = PiPManager()
-    
+
+    /// Pages whose system picture-in-picture Nook started on a tab switch, so coming back to the
+    /// tab can end it.
+    private var automaticItems: Set<UUID> = []
+
     private override init() {
         super.init()
     }
-    
+
     // MARK: - Web Video PiP
-    
-    func requestPiP(for tab: Tab, webView: WKWebView? = nil) {
-        // Use assignedWebView to avoid triggering lazy initialization
-        // PiP only works on tabs that are currently displayed
-        let targetWebView = webView ?? tab.assignedWebView
-        guard let webView = targetWebView else {
-            print("[PiP] No webView available (tab not displayed)")
-            return
-        }
-        
-        let pipToggleScript = """
+
+    /// Toggles picture-in-picture for the page's video, deciding from the video's own state.
+    /// Only a displayed page has a view, so this never creates one.
+    func requestPiP(for session: PageSession, webView: WKWebView? = nil) {
+        guard let webView = webView ?? session.assignedWebView else { return }
+        automaticItems.remove(session.itemID)
+        webView.evaluateJavaScript(Self.presentationScript(nil))
+    }
+
+    /// `hasPiPActive` follows WebKit's own events (`pipStateChange`), not this request, since
+    /// WebKit can decline it.
+    func setPiP(_ on: Bool, for session: PageSession, webView: WKWebView? = nil) {
+        guard let webView = webView ?? session.assignedWebView else { return }
+        if !on { automaticItems.remove(session.itemID) }
+        webView.evaluateJavaScript(Self.presentationScript(on))
+    }
+
+    /// Entered for the user, so `leaveAutomatic` can undo it when they come back. `screened`
+    /// applies the rules that keep feed autoplay and reels out.
+    func enterAutomatically(_ session: PageSession, webView: WKWebView, screened: Bool) {
+        automaticItems.insert(session.itemID)
+        webView.evaluateJavaScript(Self.presentationScript(true, screened: screened))
+    }
+
+    func leaveAutomatic(_ session: PageSession) {
+        guard automaticItems.contains(session.itemID) else { return }
+        setPiP(false, for: session)
+    }
+
+    /// `on` nil toggles.
+    static func presentationScript(_ on: Bool?, screened: Bool = false) -> String {
+        let mode = on.map { $0 ? "'picture-in-picture'" : "'inline'" }
+            ?? "(v.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture')"
+        return """
         (function() {
-            const video = document.querySelector('video');
-            if (!video) return { success: false, error: 'No video found' };
-            
-            try {
-                // WebKit presentation mode (Safari/macOS)
-                if (video.webkitSupportsPresentationMode && typeof video.webkitSetPresentationMode === 'function') {
-                    const currentMode = video.webkitPresentationMode || 'inline';
-                    const newMode = (currentMode === 'picture-in-picture') ? 'inline' : 'picture-in-picture';
-                    video.webkitSetPresentationMode(newMode);
-                    return { success: true, mode: newMode };
-                }
-                
-                // Standard PiP API fallback
-                if (document.pictureInPictureEnabled && video.requestPictureInPicture) {
-                    if (document.pictureInPictureElement) {
-                        document.exitPictureInPicture();
-                        return { success: true, mode: 'inline' };
-                    } else {
-                        video.requestPictureInPicture().catch(function(err) {
-                            console.log('PiP request failed:', err);
-                        });
-                        return { success: true, mode: 'picture-in-picture' };
-                    }
-                }
-                
-                return { success: false, error: 'PiP not supported on this page' };
-            } catch (error) {
-                return { success: false, error: error.message };
-            }
+            \(SidebarPiPController.pickerScript)
+            const v = nookPickVideo();
+            if (!v || v.disablePictureInPicture || typeof v.webkitSetPresentationMode !== 'function'
+                || !v.webkitSupportsPresentationMode('picture-in-picture')) return false;
+            \(screened ? "if (nookRefusesAutomatic(v)) return false;" : "")
+            v.webkitSetPresentationMode(\(mode));
+            return true;
         })();
         """
-        
-        webView.evaluateJavaScript(pipToggleScript) { result, error in
-            if let error = error {
-                print("[PiP] JavaScript error: \(error.localizedDescription)")
-                return
-            }
-            
-            if let resultDict = result as? [String: Any] {
-                if let success = resultDict["success"] as? Bool, success {
-                    if let mode = resultDict["mode"] as? String {
-                        let isPiPActive = (mode == "picture-in-picture")
-                        tab.hasPiPActive = isPiPActive
-                        print("[PiP] Web PiP toggled to: \(mode)")
-                    }
-                } else if let errorMsg = resultDict["error"] as? String {
-                    print("[PiP] Web PiP failed: \(errorMsg)")
-                }
-            }
-        }
-    }
-    
-    func stopPiP(for tab: Tab, webView: WKWebView? = nil) {
-        // Use assignedWebView to avoid triggering lazy initialization
-        let targetWebView = webView ?? tab.assignedWebView
-        guard let webView = targetWebView else { 
-            print("[PiP] No webView available for stopping PiP")
-            tab.hasPiPActive = false
-            return 
-        }
-        
-        // Check if webView is still valid and can execute JavaScript
-        guard webView.navigationDelegate != nil else {
-            print("[PiP] WebView delegate is nil, skipping PiP stop")
-            tab.hasPiPActive = false
-            return
-        }
-        
-        let stopWebPiPScript = """
-        (function() {
-            try {
-                const video = document.querySelector('video');
-                if (video) {
-                    if (video.webkitSupportsPresentationMode && video.webkitPresentationMode === 'picture-in-picture') {
-                        video.webkitSetPresentationMode('inline');
-                    } else if (document.pictureInPictureElement) {
-                        document.exitPictureInPicture();
-                    }
-                }
-                return { success: true };
-            } catch (error) {
-                return { success: false, error: error.message };
-            }
-        })();
-        """
-        
-        webView.evaluateJavaScript(stopWebPiPScript) { result, error in
-            if let error = error {
-                print("[PiP] Error stopping web PiP: \(error.localizedDescription)")
-            } else if let resultDict = result as? [String: Any] {
-                if let success = resultDict["success"] as? Bool, !success {
-                    if let errorMsg = resultDict["error"] as? String {
-                        print("[PiP] JavaScript error stopping PiP: \(errorMsg)")
-                    }
-                }
-            }
-        }
-        
-        tab.hasPiPActive = false
-    }
-    
-    func isPiPActive(for tab: Tab) -> Bool {
-        return tab.hasPiPActive
     }
 }

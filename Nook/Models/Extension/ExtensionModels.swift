@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  ExtensionModels.swift
 //  Nook
@@ -11,8 +12,8 @@ import SwiftData
 @Model
 final class ExtensionEntity {
     @Attribute(.unique) var id: String
-    // Installation scope note: Extensions are installed/enabled globally across profiles.
-    // Storage/state for extensions is profile-isolated via ExtensionManager data stores.
+    // Extensions are global: one install, one enabled state, and one storage namespace
+    // shared by every profile. Private (ephemeral) tabs never see extensions.
     var name: String
     var version: String
     var manifestVersion: Int
@@ -22,7 +23,12 @@ final class ExtensionEntity {
     var lastUpdateDate: Date
     var packagePath: String // Path to the extension package
     var iconPath: String?
-    
+    var grantedOptionalPermissions: [String]?
+    var grantedOptionalMatchPatterns: [String]?
+    /// Store the extension came from ("chrome" or "edge"). When set, `id` is the store's
+    /// extension ID and the extension receives automatic updates from that store.
+    var sourceStore: String?
+
     init(
         id: String,
         name: String,
@@ -33,7 +39,9 @@ final class ExtensionEntity {
         installDate: Date = Date(),
         lastUpdateDate: Date = Date(),
         packagePath: String,
-        iconPath: String? = nil
+        iconPath: String? = nil,
+        grantedOptionalPermissions: [String] = [],
+        grantedOptionalMatchPatterns: [String] = []
     ) {
         self.id = id
         self.name = name
@@ -45,6 +53,8 @@ final class ExtensionEntity {
         self.lastUpdateDate = lastUpdateDate
         self.packagePath = packagePath
         self.iconPath = iconPath
+        self.grantedOptionalPermissions = grantedOptionalPermissions
+        self.grantedOptionalMatchPatterns = grantedOptionalMatchPatterns
     }
 }
 

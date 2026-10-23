@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  URLBarView.swift
 //  Nook
@@ -7,79 +8,103 @@
 
 import SwiftUI
 import AppKit
+import NookDesign
+import NookWeb
+import NookUI
 
 struct URLBarView: View {
     @EnvironmentObject var browserManager: BrowserManager
     @Environment(BrowserWindowState.self) private var windowState
     @Environment(\.nookSettings) var nookSettings
-    @Environment(\.colorScheme) var colorScheme
     @State private var isHovering: Bool = false
     @State private var showCheckmark: Bool = false
     var isSidebarHovered: Bool
 
     var body: some View {
+        let session = browserManager.tabs.selectedSession(in: windowState)
         ZStack {
-            HStack(spacing: 8) {
-                    if browserManager.currentTab(for: windowState) != nil {
-                        Text(
-                            displayURL
-                        )
-                        .font(.system(size: 12, weight: .medium, design: .default))
-                        .foregroundStyle(textColor)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    } else {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 12))
-                            .foregroundStyle(textColor)
-                        Text("Search or Enter URL...")
-                            .font(.system(size: 12, weight: .medium, design: .default))
-                            .foregroundStyle(textColor)
+            HStack(spacing: NookDesign.Spacing.sm) {
+                    // URL text area — tappable to open command palette
+                    Group {
+                        if session != nil {
+                            HStack(spacing: NookDesign.Spacing.xs) {
+                                // HTTPS is the norm, so only a page that is not gets a mark.
+                                if isInsecure(for: session) {
+                                    Image(systemName: "lock.open.fill")
+                                        .font(.system(size: NookDesign.Size.rowGlyph, weight: .medium))
+                                        .foregroundStyle(.secondary)
+                                }
+                                // Two texts so a narrow sidebar cuts the path first and then the
+                                // host's head: `accounts.google.com.x.evil.tld` must keep `evil.tld`.
+                                HStack(spacing: 0) {
+                                    Text(displayHost(for: session)).foregroundStyle(.primary)
+                                        .truncationMode(.head)
+                                        .layoutPriority(1)
+                                    Text(displayPath(for: session)).foregroundStyle(.tertiary)
+                                        .truncationMode(.tail)
+                                }
+                                .font(NookDesign.Font.secondary)
+                                .lineLimit(1)
+                            }
+                        } else {
+                            HStack(spacing: NookDesign.Spacing.xs) {
+                                Image(systemName: "magnifyingglass")
+                                    .font(.system(size: NookDesign.Size.rowGlyph, weight: .medium))
+                                    .foregroundStyle(textColor)
+                                Text("Search or Enter URL...")
+                                    .font(NookDesign.Font.secondary)
+                                    .foregroundStyle(textColor)
+                            }
+                        }
                     }
-                    
-                    Spacer()
-                    
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .pointerStyle(.horizontalText)
+                    .onTapGesture {
+                        let urlString = session?.url.absoluteString ?? ""
+                        windowState.commandPalette?.open(prefill: urlString, navigateCurrentTab: true)
+                    }
+
                     // Copy link button (show on hover when tab is selected)
-                    if isHovering, let currentTab = browserManager.currentTab(for: windowState) {
+                    if isHovering, let session {
                         Button("Copy Link", systemImage: showCheckmark ? "checkmark" : "link") {
-                            copyURLToClipboard(currentTab.url.absoluteString)
+                            copyURLToClipboard(session.url.absoluteString)
                         }
                         .labelStyle(.iconOnly)
-                        .buttonStyle(URLBarButtonStyle())
+                        .buttonStyle(NookIconButtonStyle(size: NookDesign.Size.iconButton, radius: NookDesign.Radius.sm))
                         .foregroundStyle(Color.primary)
                         .transition(.opacity.combined(with: .scale(scale: 0.9)))
                         .contentTransition(.symbolEffect(.replace))
                     }
-                    
-                    // PiP button (show when video content is available or PiP is active)
-                    if let currentTab = browserManager.currentTab(for: windowState),
-                       (currentTab.hasVideoContent || currentTab.hasPiPActive) {
-                        Button(action: {
-                            currentTab.requestPictureInPicture()
-                        }) {
-                            Image(systemName: currentTab.hasPiPActive ? "pip.exit" : "pip.enter")
-                                .font(.system(size: 12))
-                                .foregroundStyle(textColor.opacity(currentTab.hasPiPActive ? 1.0 : 0.7))
+
+                    // Pinned extension buttons + library button
+                    if let extensionManager = browserManager.extensionManager {
+                        let pinnedIDs = browserManager.nookSettings?.pinnedExtensionIDs ?? []
+                        let pinnedExtensions = extensionManager.installedExtensions.filter { pinnedIDs.contains($0.id) }
+
+                        if !pinnedExtensions.isEmpty {
+                            ExtensionActionView(extensions: pinnedExtensions)
+                                .environmentObject(browserManager)
                         }
-                        .buttonStyle(.plain)
-                        .help(currentTab.hasPiPActive ? "Exit Picture in Picture" : "Enter Picture in Picture")
-                    }
-                    
-                    // Extension action buttons
-                    if #available(macOS 15.5, *),
-                       let extensionManager = browserManager.extensionManager {
-                        ExtensionActionView(extensions: extensionManager.installedExtensions)
+
+                        ExtensionLibraryButton()
                             .environmentObject(browserManager)
+                            .onAppear {
+                                let installedIDs = extensionManager.installedExtensions
+                                    .filter { $0.isEnabled }
+                                    .map { $0.id }
+                                browserManager.nookSettings?.migrateExtensionPinStateIfNeeded(installedExtensionIDs: installedIDs)
+                            }
                     }
                 }
-                .padding(.leading, 12)
-                .padding(.trailing, 8)
+                .padding(.horizontal, NookDesign.Spacing.rowPadding)
         }
-        .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36)
-        .background(
-           backgroundColor
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .frame(maxWidth: .infinity, minHeight: NookDesign.Size.chromeControl, maxHeight: NookDesign.Size.chromeControl)
+        .overlay(alignment: .bottom) {
+            PageLoadingProgressBar(session: session)
+        }
+        .clipShape(NookDesign.Radius.shape(NookDesign.Radius.md))
+        .nookControlSurface(in: NookDesign.Radius.shape(NookDesign.Radius.md))
         // Report the frame in the window space so we can overlay the mini palette above all content
         .background(
             GeometryReader { proxy in
@@ -89,38 +114,42 @@ struct URLBarView: View {
                 )
             }
         )
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.1)) {
+        .onHoverTracking { hovering in
+            withAnimation(NookDesign.Motion.quick) {
                 isHovering = hovering
             }
         }
-        // Focus URL bar when tapping anywhere in the bar
-        .contentShape(Rectangle())
-        .onTapGesture {
-            let currentURL = browserManager.currentTab(for: windowState)?.url.absoluteString ?? ""
-            windowState.commandPalette?.open(prefill: currentURL, navigateCurrentTab: true)
-        }
         
     }
     
-    private var backgroundColor: Color {
-        if isHovering {
-            return colorScheme == .dark ? AppColors.pinnedTabHoverLight : AppColors.pinnedTabHoverDark
-        } else {
-            return colorScheme == .dark ? AppColors.pinnedTabIdleLight : AppColors.pinnedTabIdleDark
-        }
-    }
     private var textColor: Color {
-        return colorScheme == .dark ? AppColors.iconActiveLight : AppColors.iconActiveDark
+        .secondary
     }
     
-    private var displayURL: String {
-            guard let currentTab = browserManager.currentTab(for: windowState) else {
-                return ""
-            }
-            return formatURL(currentTab.url)
-        }
-        
+    private func displayURL(for session: PageSession?) -> String {
+        guard let session else { return "" }
+        return formatURL(session.url)
+    }
+
+    private func isInsecure(for session: PageSession?) -> Bool { session?.url.scheme == "http" }
+    /// The host, carrying the port when the URL names a non-default one. A development
+    /// server at `localhost:3000` is a different origin from one at `localhost:8080`, so
+    /// dropping the port left the bar showing the wrong thing. `URL.port` reports a port
+    /// that was written out even when it is the scheme's default, so `https://x.com:443`
+    /// still reads as `x.com`.
+    private func displayHost(for session: PageSession?) -> String {
+        guard let url = session?.url, let host = url.host else { return displayURL(for: session) }
+        let defaultPort = url.scheme == "https" ? 443 : (url.scheme == "http" ? 80 : nil)
+        guard let port = url.port, port != defaultPort else { return host }
+        return "\(host):\(port)"
+    }
+    private func displayPath(for session: PageSession?) -> String {
+        guard let url = session?.url, url.host != nil else { return "" }
+        let path = url.path
+        return path == "/" ? "" : path
+    }
+
+
         private func formatURL(_ url: URL) -> String {
             guard let host = url.host else {
                 return url.absoluteString
@@ -136,7 +165,7 @@ struct URLBarView: View {
         NSPasteboard.general.setString(urlString, forType: .string)
         
         // Show checkmark icon briefly
-        withAnimation(.easeInOut(duration: 0.2)) {
+        withAnimation(NookDesign.Motion.standard) {
             showCheckmark = true
         }
         
@@ -145,7 +174,7 @@ struct URLBarView: View {
         
         // Reset checkmark after 1 second
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            withAnimation(.easeInOut(duration: 0.2)) {
+            withAnimation(NookDesign.Motion.standard) {
                 showCheckmark = false
             }
         }
@@ -153,44 +182,6 @@ struct URLBarView: View {
         // Hide toast after 2 seconds
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             windowState.isShowingCopyURLToast = false
-        }
-    }
-}
-
-// MARK: - URL Bar Button Style
-struct URLBarButtonStyle: ButtonStyle {
-    @Environment(\.colorScheme) var colorScheme
-    @Environment(\.isEnabled) var isEnabled
-    @State private var isHovering: Bool = false
-    
-    private let cornerRadius: CGFloat = 12
-    private let size: CGFloat = 28
-    private let borderInset: CGFloat = 4
-    
-    func makeBody(configuration: Configuration) -> some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: cornerRadius)
-                .fill(.primary.opacity(backgroundColorOpacity(isPressed: configuration.isPressed)))
-                .frame(width: size, height: size)
-            
-            configuration.label
-                .foregroundStyle(.primary)
-        }
-        .opacity(isEnabled ? 1.0 : 0.3)
-        .contentTransition(.symbolEffect(.replace.upUp.byLayer, options: .nonRepeating))
-        .scaleEffect(configuration.isPressed && isEnabled ? 0.95 : 1.0)
-        .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
-        .animation(.easeInOut(duration: 0.15), value: isHovering)
-        .onHover { hovering in
-            isHovering = hovering
-        }
-    }
-    
-    private func backgroundColorOpacity(isPressed: Bool) -> Double {
-        if (isHovering || isPressed) && isEnabled {
-            return colorScheme == .dark ? 0.2 : 0.1
-        } else {
-            return 0.0
         }
     }
 }

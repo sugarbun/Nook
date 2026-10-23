@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  SidebarHeader.swift
 //  Nook
@@ -6,83 +7,71 @@
 //
 
 import SwiftUI
+import NookDesign
+import NookWeb
+import NookUI
 
-/// Header section of the sidebar (window controls, navigation buttons, URL bar)
+/// Header section of the sidebar (window controls and space name, URL bar). Back, forward and
+/// reload sit in the title row above it.
 struct SidebarHeader: View {
     @EnvironmentObject var browserManager: BrowserManager
     @Environment(BrowserWindowState.self) private var windowState
     @Environment(\.nookSettings) var nookSettings
     let isSidebarHovered: Bool
-    @State private var sidebarWidth: CGFloat = 0
+    let onNewSpace: () -> Void
 
     var body: some View {
-        VStack(spacing: 8) {
-            if nookSettings.topBarAddressView {
-                windowControls
-            }
+        VStack(spacing: NookDesign.Spacing.sectionGap) {
+            windowControls
 
             if !nookSettings.topBarAddressView {
-                navigationButtons
                 urlBar
             }
-        }
-        .onGeometryChange(for: CGFloat.self) { proxy in
-            proxy.size.width
-        } action: { newWidth in
-            sidebarWidth = newWidth
         }
     }
 
     private var windowControls: some View {
-        SidebarWindowControlsView()
+        SidebarWindowControlsView(onNewSpace: onNewSpace)
             .environmentObject(browserManager)
             .environment(windowState)
-            .padding(.horizontal, 8)
-    }
-
-    private var navigationButtons: some View {
-        HStack(spacing: 2) {
-            NavButtonsView(effectiveSidebarWidth: sidebarWidth)
-        }
-        .padding(.horizontal, 8)
-        .frame(height: 30)
+            .padding(.horizontal, NookDesign.Spacing.sidebarInset)
     }
 
     private var urlBar: some View {
         URLBarView(isSidebarHovered: isSidebarHovered)
-            .padding(.horizontal, 8)
+            .padding(.horizontal, NookDesign.Spacing.sidebarInset)
     }
 }
 
-// MARK: - Sidebar Window Controls (Top Bar Mode)
+// MARK: - Sidebar Window Controls
+/// The sidebar and AI toggles, with the space name at the trailing edge.
 struct SidebarWindowControlsView: View {
     @EnvironmentObject var browserManager: BrowserManager
     @Environment(BrowserWindowState.self) private var windowState
     @Environment(\.nookSettings) var nookSettings
+    let onNewSpace: () -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
-            MacButtonsView()
-                .frame(width: 70)
-
-            Button("Toggle Sidebar", systemImage: nookSettings.sidebarPosition == .left ? "sidebar.left" : "sidebar.right") {
-                browserManager.toggleSidebar(for: windowState)
-            }
-            .labelStyle(.iconOnly)
-            .buttonStyle(NavButtonStyle())
-            .foregroundStyle(Color.primary)
-
-            if nookSettings.showAIAssistant {
-                Button("Toggle AI Assistant", systemImage: "sparkle") {
-                    browserManager.toggleAISidebar(for: windowState)
+        HStack(spacing: 0) {
+            HStack(spacing: NookDesign.Spacing.xxs) {
+                Button("Toggle Sidebar", systemImage: nookSettings.sidebarPosition == .left ? "sidebar.left" : "sidebar.right") {
+                    browserManager.toggleSidebar(for: windowState)
                 }
-                .labelStyle(.iconOnly)
-                .buttonStyle(NavButtonStyle())
-                .foregroundStyle(Color.primary)
-            }
 
-            Spacer()
+                if nookSettings.showAIAssistant {
+                    Button("Toggle AI Assistant", systemImage: "sparkle") {
+                        browserManager.toggleAISidebar(for: windowState)
+                    }
+                }
+            }
+            .nookIconButtons()
+
+            Spacer(minLength: 0)
+
+            // Gives way before the buttons: a long name fades out.
+            SpaceSwitcherTitle(onNewSpace: onNewSpace)
+                .layoutPriority(1)
         }
-        .frame(height: 28)
+        .frame(height: NookDesign.Size.chromeControl)
     }
 }

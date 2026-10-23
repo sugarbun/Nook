@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  ToolExecutionGlowView.swift
 //  Nook
@@ -6,6 +7,7 @@
 //
 
 import SwiftUI
+import NookDesign
 
 struct ToolExecutionGlowView: View {
     @State private var rotation1: Double = 0
@@ -22,12 +24,17 @@ struct ToolExecutionGlowView: View {
         Color(hex: "BC82F3"),
     ]
 
+    // continuous motion, not a state transition
+    private let rotation1Duration: Double = 2
+    private let rotation2Duration: Double = 2.5
+    private let rotation3Duration: Double = 3
+
     var body: some View {
-        let cornerRadius: CGFloat = 12
+        let cornerRadius: CGFloat = NookDesign.Radius.lg
 
         ZStack {
             // Layer 1 — tight, sharp glow
-            RoundedRectangle(cornerRadius: cornerRadius)
+            NookDesign.Radius.shape(cornerRadius)
                 .stroke(
                     AngularGradient(colors: colors, center: .center, angle: .degrees(rotation1)),
                     lineWidth: 4
@@ -36,7 +43,7 @@ struct ToolExecutionGlowView: View {
                 .opacity(0.9)
 
             // Layer 2 — medium spread
-            RoundedRectangle(cornerRadius: cornerRadius)
+            NookDesign.Radius.shape(cornerRadius)
                 .stroke(
                     AngularGradient(colors: colors, center: .center, angle: .degrees(rotation2)),
                     lineWidth: 8
@@ -45,7 +52,7 @@ struct ToolExecutionGlowView: View {
                 .opacity(0.6)
 
             // Layer 3 — wide ambient glow
-            RoundedRectangle(cornerRadius: cornerRadius)
+            NookDesign.Radius.shape(cornerRadius)
                 .stroke(
                     AngularGradient(colors: colors, center: .center, angle: .degrees(rotation3)),
                     lineWidth: 12
@@ -56,13 +63,13 @@ struct ToolExecutionGlowView: View {
         .padding(1)
         .allowsHitTesting(false)
         .onAppear {
-            withAnimation(.linear(duration: 2).repeatForever(autoreverses: false)) {
+            withAnimation(.linear(duration: rotation1Duration).repeatForever(autoreverses: false)) {
                 rotation1 = 360
             }
-            withAnimation(.linear(duration: 2.5).repeatForever(autoreverses: false)) {
+            withAnimation(.linear(duration: rotation2Duration).repeatForever(autoreverses: false)) {
                 rotation2 = 360
             }
-            withAnimation(.linear(duration: 3).repeatForever(autoreverses: false)) {
+            withAnimation(.linear(duration: rotation3Duration).repeatForever(autoreverses: false)) {
                 rotation3 = 360
             }
         }

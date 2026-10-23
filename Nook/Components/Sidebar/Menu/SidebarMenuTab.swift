@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  SidebarMenuTab.swift
 //  Nook
@@ -6,6 +7,9 @@
 //
 
 import SwiftUI
+import NookDesign
+import NookWeb
+import NookUI
 
 struct SidebarMenuTab: View {
     var image: String
@@ -16,31 +20,41 @@ struct SidebarMenuTab: View {
     @State private var isHovering: Bool = false
     @State private var shouldWiggle: Bool = false
 
+    private let height: CGFloat = 80
+
     var body: some View {
-        VStack(spacing: 8) {
+        Button {
+            action()
+            shouldWiggle.toggle()
+        } label: {
+            label
+        }
+        .buttonStyle(.plain)
+        .onHoverTracking { state in
+            isHovering = state
+        }
+    }
+
+    private var label: some View {
+        VStack(spacing: NookDesign.Spacing.md) {
             Image(systemName: isActive ? activeImage : image)
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(isActive ? .green : .white)
+                .font(NookDesign.Font.titleLarge)
+                .foregroundStyle(isActive ? .green : .primary)
                 .symbolRenderingMode(.hierarchical)
                 .symbolEffect(.wiggle, value: shouldWiggle)
                 .contentTransition(.symbolEffect(.replace.magic(fallback: .downUp.byLayer), options: .nonRepeating))
 
             Text(title)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.white)
+                .font(NookDesign.Font.secondary)
+                .foregroundStyle(.primary)
         }
-        .frame(height: 80)
+        .frame(height: height)
         .frame(maxWidth: .infinity)
-        .background(isActive ?.white.opacity(0.1) : isHovering ? .white.opacity(0.05) : .clear)
-        .animation(.linear(duration: 0.1), value: isHovering)
-        .animation(.linear(duration: 0.2), value: isActive)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .onHover { state in
-            isHovering = state
-        }
-        .onTapGesture {
-            action()
-            shouldWiggle.toggle()
-        }
+        // The chosen tab takes the selected sidebar row's surface, so it takes no hover fill.
+        .background(!isActive && isHovering ? NookDesign.Surface.fill : .clear, in: NookDesign.Radius.shape(NookDesign.Radius.xl))
+        .contentShape(NookDesign.Radius.shape(NookDesign.Radius.xl))
+        .nookRowSelection(isActive, radius: NookDesign.Radius.xl)
+        .animation(NookDesign.Motion.quick, value: isHovering)
+        .animation(NookDesign.Motion.standard, value: isActive)
     }
 }

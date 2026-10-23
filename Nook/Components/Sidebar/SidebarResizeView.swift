@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  SidebarResizeView.swift
 //  Nook
@@ -6,6 +7,9 @@
 //
 
 import SwiftUI
+import NookDesign
+import NookWeb
+import NookUI
 
 struct SidebarResizeView: View {
     @EnvironmentObject var browserManager: BrowserManager
@@ -18,10 +22,10 @@ struct SidebarResizeView: View {
     @StateObject private var dragLockManager = DragLockManager.shared
     @State private var dragSessionID: String = UUID().uuidString
     @State private var hoverTask: Task<Void, Never>?
-    @Environment(\.colorScheme) var colorScheme
 
-    private let minWidth: CGFloat = 180
+    private let minWidth = NookDesign.Size.sidebarMin
     private let maxWidth: CGFloat = 520
+    private let defaultWidth: CGFloat = 250
 
     private var sitsOnRight: Bool {
         nookSettings.sidebarPosition == .right
@@ -38,13 +42,13 @@ struct SidebarResizeView: View {
     var body: some View {
         ZStack {
             if isHovering || isResizing {
-                RoundedRectangle(cornerRadius: 100)
-                    .fill(colorScheme == .dark  ? .white.opacity(0.45) : .black.opacity(0.45))
+                Capsule()
+                    .fill(Color.secondary)
                     .frame(width: 4)
                     .frame(maxHeight: .infinity)
                     .offset(x: indicatorOffset)
-                    .animation(.easeInOut(duration: 0.15), value: isResizing)
-                    .animation(.easeInOut(duration: 0.15), value: isHovering)
+                    .animation(NookDesign.Motion.quick, value: isResizing)
+                    .animation(NookDesign.Motion.quick, value: isHovering)
                     .padding(.vertical, 30)
             }
 
@@ -54,7 +58,13 @@ struct SidebarResizeView: View {
                 .padding(.vertical, 30)
                 .offset(x: hitAreaOffset)
                 .contentShape(.interaction, .rect)
-                .onHover { hovering in
+                .onTapGesture(count: 2) {
+                    guard windowState.isSidebarVisible else { return }
+                    withAnimation(NookDesign.Motion.spring) {
+                        browserManager.updateSidebarWidth(defaultWidth, for: windowState)
+                    }
+                }
+                .onHoverTracking { hovering in
                     guard windowState.isSidebarVisible else { return }
 
                     hoverTask?.cancel()
@@ -74,13 +84,12 @@ struct SidebarResizeView: View {
                     }
                 }
                 .gesture(
-                    DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                    DragGesture(minimumDistance: 2, coordinateSpace: .global)
                         .onChanged { value in
                             guard windowState.isSidebarVisible else { return }
 
                             if !isResizing {
                                 guard dragLockManager.startDrag(ownerID: dragSessionID) else {
-                                    print("🚫 [SidebarResizeView] Resize drag blocked - \(dragLockManager.debugInfo)")
                                     return
                                 }
 

@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  KeyboardShortcut.swift
 //  Nook
@@ -85,11 +86,12 @@ enum ShortcutAction: String, CaseIterable, Hashable, Codable {
     case toggleAIAssistant = "toggle_ai_assistant"             // Cmd+Shift+A
     case togglePictureInPicture = "toggle_pip"                 // Cmd+Shift+P
     case copyCurrentURL = "copy_current_url"                   // Cmd+Shift+C
+    case printPage = "print_page"                              // Cmd+P
     case hardReload = "hard_reload"                            // Cmd+Shift+R
     case muteUnmuteAudio = "mute_unmute_audio"                 // Cmd+M
     case installExtension = "install_extension"                // Cmd+Shift+E
     case customizeSpaceGradient = "customize_space_gradient"   // Cmd+Shift+G
-    case createBoost = "create_boost"                          // Cmd+Shift+B
+    case organizeTabs = "organize_tabs"                        // Cmd+Shift+Option+O
 
     var displayName: String {
         switch self {
@@ -133,11 +135,12 @@ enum ShortcutAction: String, CaseIterable, Hashable, Codable {
         case .toggleAIAssistant: return "Toggle AI Assistant"
         case .togglePictureInPicture: return "Toggle Picture in Picture"
         case .copyCurrentURL: return "Copy Current URL"
+        case .printPage: return "Print"
         case .hardReload: return "Hard Reload"
         case .muteUnmuteAudio: return "Mute/Unmute Audio"
         case .installExtension: return "Install Extension"
-        case .customizeSpaceGradient: return "Customize Space Gradient"
-        case .createBoost: return "Create Boost"
+        case .customizeSpaceGradient: return "Space Settings"
+        case .organizeTabs: return "Organize Tabs"
         }
     }
 
@@ -163,7 +166,7 @@ enum ShortcutAction: String, CaseIterable, Hashable, Codable {
             return .tools
         case .togglePictureInPicture:
             return .tools
-        case .copyCurrentURL:
+        case .copyCurrentURL, .printPage:
             return .tools
         case .hardReload:
             return .navigation
@@ -173,7 +176,7 @@ enum ShortcutAction: String, CaseIterable, Hashable, Codable {
             return .tools
         case .customizeSpaceGradient:
             return .spaces
-        case .createBoost:
+        case .organizeTabs:
             return .tools
         }
     }
@@ -349,11 +352,12 @@ extension KeyboardShortcut {
             KeyboardShortcut(action: .toggleAIAssistant, keyCombination: KeyCombination(key: "a", modifiers: [.command, .shift])),
             KeyboardShortcut(action: .togglePictureInPicture, keyCombination: KeyCombination(key: "p", modifiers: [.command, .shift])),
             KeyboardShortcut(action: .copyCurrentURL, keyCombination: KeyCombination(key: "c", modifiers: [.command, .shift])),
+            KeyboardShortcut(action: .printPage, keyCombination: KeyCombination(key: "p", modifiers: [.command])),
             KeyboardShortcut(action: .hardReload, keyCombination: KeyCombination(key: "r", modifiers: [.command, .shift])),
             KeyboardShortcut(action: .muteUnmuteAudio, keyCombination: KeyCombination(key: "m", modifiers: [.command])),
             KeyboardShortcut(action: .installExtension, keyCombination: KeyCombination(key: "e", modifiers: [.command, .shift])),
             KeyboardShortcut(action: .customizeSpaceGradient, keyCombination: KeyCombination(key: "g", modifiers: [.command, .shift])),
-            KeyboardShortcut(action: .createBoost, keyCombination: KeyCombination(key: "b", modifiers: [.command, .shift]))
+            KeyboardShortcut(action: .organizeTabs, keyCombination: KeyCombination(key: "o", modifiers: [.command, .shift, .option]))
         ]
     }
 }

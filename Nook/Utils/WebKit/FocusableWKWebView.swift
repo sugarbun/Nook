@@ -1,30 +1,36 @@
+// Licensed under GPL-3.0. See LICENSE.
 import AppKit
-import UserNotifications
+import NookWeb
+@preconcurrency import UserNotifications
 import WebKit
 import UniformTypeIdentifiers
 
 // Simple subclass to ensure clicking a webview focuses its tab in the app state
 @MainActor
-final class FocusableWKWebView: WKWebView {
-    weak var owningTab: Tab?
+final class FocusableWKWebView: WKWebView, SessionWebView {
+    weak var owningSession: PageSession?
     var contextMenuBridge: WebContextMenuBridge?
-    private static let imageContentTypes: [UTType] = [
+    nonisolated private static let imageContentTypes: [UTType] = [
         .jpeg, .png, .gif, .bmp, .tiff, .webP, .heic, .heif
     ]
 
     deinit {
+        // MEMORY LEAK FIX: Detach bridge deterministically. The primary cleanup now
+        // happens in PageSession.cleanupClone(_:), but this is a safety net.
         if let bridge = contextMenuBridge {
+            let bridge = bridge
             Task { @MainActor in
                 bridge.detach()
             }
         }
+        contextMenuBridge = nil
     }
 
     override func mouseDown(with event: NSEvent) {
         // Store Option key state for Peek functionality
-        owningTab?.isOptionKeyDown = event.modifierFlags.contains(.option)
+        owningSession?.isOptionKeyDown = event.modifierFlags.contains(.option)
 
-        owningTab?.activate()
+        owningSession?.activate()
         // Ensure this webview becomes first responder so it can receive menu events
         if window?.firstResponder != self {
             window?.makeFirstResponder(self)
@@ -32,22 +38,105 @@ final class FocusableWKWebView: WKWebView {
         super.mouseDown(with: event)
     }
 
+    /// A three-finger or Magic Mouse swipe back. WebKit only acts on it with history, so on a
+    /// page opened from another tab it returns there, like the two-finger swipe.
+    override func swipe(with event: NSEvent) {
+        if event.deltaX > 0, !canGoBack, let session = owningSession, session.canGoBackOrReturn {
+            session.goBack(in: self)
+        } else {
+            super.swipe(with: event)
+        }
+    }
+
     override func rightMouseDown(with event: NSEvent) {
-        print("🔽 [FocusableWKWebView] rightMouseDown called")
-        owningTab?.activate()
+        owningSession?.activate()
         // Ensure this webview becomes first responder so willOpenMenu gets called
         if window?.firstResponder != self {
-            print("🔽 [FocusableWKWebView] Making webview first responder")
             window?.makeFirstResponder(self)
         }
         super.rightMouseDown(with: event)
     }
-    
+
     override var acceptsFirstResponder: Bool { true }
+
+    /// Keeps a mini window page's fixed content clear of the window's glass toolbar while the
+    /// page scrolls underneath it. Synced in `layout()` so it survives resize, full screen and
+    /// toolbar changes; in a browser window the inset stays zero.
+    override func layout() {
+        super.layout()
+        guard let window = window as? MiniBrowserWindow, bounds.height > 0 else {
+            if obscuredContentInsets.top != 0 { obscuredContentInsets = NSEdgeInsetsZero }
+            return
+        }
+        // How far this view reaches up under the titlebar and toolbar. WebKit throws on
+        // negative insets or insets taller than the view, both possible mid-layout.
+        let overlap = convert(bounds, to: nil).maxY - window.contentLayoutRect.maxY
+        let inset = min(max(0, overlap), bounds.height - 1)
+        if obscuredContentInsets.top != inset {
+            obscuredContentInsets = NSEdgeInsets(top: inset, left: 0, bottom: 0, right: 0)
+        }
+    }
+
+    /// Set when sidebar PiP asks to isolate the page; undone when the view next lands in a tab.
+    var isPictureInPictureIsolated = false
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        guard let superview else { return }
+        let cropped = superview is SidebarPiPCropView
+        // A cropped page would get the pointer at the wrong place: AppKit maps it without the
+        // crop's transform, and wakes the player's controls under the video.
+        setIgnoresNonWheelEvents(cropped)
+        if !cropped, isPictureInPictureIsolated {
+            isPictureInPictureIsolated = false
+            SidebarPiPController.restorePage(in: self)
+        }
+    }
+
+    /// With navigation gestures on and no back item, WebKit bounces the page's back edge whatever
+    /// its edge setting, which uses up the swipe before `PageSession`'s
+    /// `_webView:didNotHandleWheelEvent:` can see it. For a swipe back on a page opened from another
+    /// tab, gestures go off and that edge stays still, the state a page with history is in; a
+    /// carousel still scrolls. Only swipes back toggle it, so page snapshots keep recording.
+    override func scrollWheel(with event: NSEvent) {
+        if event.phase == .began {
+            let rightToLeft = userInterfaceLayoutDirection == .rightToLeft
+            let isSwipeBack = abs(event.scrollingDeltaY) < abs(event.scrollingDeltaX) / 2
+                && (rightToLeft ? event.scrollingDeltaX < 0 : event.scrollingDeltaX > 0)
+            let returnsToOpener = isSwipeBack && !canGoBack && owningSession?.canGoBackOrReturn == true
+            if allowsBackForwardNavigationGestures == returnsToOpener {
+                allowsBackForwardNavigationGestures = !returnsToOpener
+            }
+            let backEdge: UInt = rightToLeft ? 4 : 1  // _WKRectEdgeRight, _WKRectEdgeLeft
+            setRubberBandingEdges(returnsToOpener ? 15 & ~backEdge : 15)  // 15: _WKRectEdgeAll, WebKit's default
+        }
+        super.scrollWheel(with: event)
+    }
+
+    /// `_setRubberBandingEnabled:`, private.
+    private func setRubberBandingEdges(_ edges: UInt) {
+        let selector = NSSelectorFromString("_setRubberBandingEnabled:")
+        guard responds(to: selector) else { return }
+        typealias Setter = @convention(c) (AnyObject, Selector, UInt) -> Void
+        unsafeBitCast(method(for: selector), to: Setter.self)(self, selector, edges)
+    }
+
+    /// `_setIgnoresNonWheelEvents:`, private; also stops WebKit's post-scroll fake mouse moves.
+    private func setIgnoresNonWheelEvents(_ ignores: Bool) {
+        let selector = NSSelectorFromString("_setIgnoresNonWheelEvents:")
+        guard responds(to: selector) else { return }
+        typealias Setter = @convention(c) (AnyObject, Selector, Bool) -> Void
+        unsafeBitCast(method(for: selector), to: Setter.self)(self, selector, ignores)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        owningSession?.pointerMovedOverPage()
+    }
 
     override func mouseUp(with event: NSEvent) {
         // Reset Option key state after mouse up
-        owningTab?.isOptionKeyDown = false
+        owningSession?.isOptionKeyDown = false
         super.mouseUp(with: event)
     }
     private weak var pendingMenu: NSMenu?
@@ -55,49 +144,39 @@ final class FocusableWKWebView: WKWebView {
     private var contextMenuFallbackWorkItem: DispatchWorkItem?
 
     override func menu(for event: NSEvent) -> NSMenu? {
-        print("🔽 [FocusableWKWebView] menu(for:) called - START")
         guard let menu = super.menu(for: event) else {
-            print("🔽 [FocusableWKWebView] menu(for:) - super.menu returned nil")
             return nil
         }
-        print("🔽 [FocusableWKWebView] menu(for:) - got menu with \(menu.items.count) items")
         prepareMenu(menu)
-        print("🔽 [FocusableWKWebView] menu(for:) - returning menu with \(menu.items.count) items")
         return menu
     }
 
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
-        print("🔽 [FocusableWKWebView] willOpenMenu called - START, menu items: \(menu.items.count), menu address: \(ObjectIdentifier(menu))")
         super.willOpenMenu(menu, with: event)
         prepareMenu(menu)
-        print("🔽 [FocusableWKWebView] willOpenMenu - AFTER prepareMenu, menu items: \(menu.items.count)")
     }
 
     private func prepareMenu(_ menu: NSMenu) {
-        print("🔽 [FocusableWKWebView] prepareMenu called, pendingPayload exists: \(pendingPayload != nil), owningTab?.pendingContextMenuPayload exists: \(owningTab?.pendingContextMenuPayload != nil)")
         pendingMenu = menu
-        pendingPayload = owningTab?.pendingContextMenuPayload
+        pendingPayload = owningSession?.pendingContextMenuPayload
 
         contextMenuFallbackWorkItem?.cancel()
         let fallback = DispatchWorkItem { [weak self, weak menu] in
             guard let self, let menu, self.pendingMenu === menu else {
-                print("🔽 [FocusableWKWebView] FALLBACK TIMER: Guard failed - self exists: \(self != nil), menu exists: \(menu != nil), pendingMenu === menu: \(self?.pendingMenu === menu)")
                 return
             }
-            print("🔽 [FocusableWKWebView] FALLBACK TIMER EXECUTING - sanitizing default menu")
             self.sanitizeDefaultMenu(menu)
             self.pendingMenu = nil
             self.pendingPayload = nil
             self.contextMenuFallbackWorkItem = nil
-            self.owningTab?.pendingContextMenuPayload = nil
+            self.owningSession?.pendingContextMenuPayload = nil
         }
         contextMenuFallbackWorkItem = fallback
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: fallback)
 
-        let applied = applyPendingContextMenuIfPossible()
-        print("🔽 [FocusableWKWebView] prepareMenu: applyPendingContextMenuIfPossible returned \(applied)")
+        _ = applyPendingContextMenuIfPossible()
     }
-    
+
     func handleImageDownload(identifier: String, promptForLocation: Bool = false) {
         let destinationPreference: Download.DestinationPreference = promptForLocation ? .askUser : .automaticDownloadsFolder
 
@@ -106,8 +185,8 @@ final class FocusableWKWebView: WKWebView {
             return
         }
 
-        guard let url = resolveImageURL(from: identifier) else {
-            print("🔽 [FocusableWKWebView] Unable to resolve image URL from: \(identifier)")
+        guard let url = resolveImageURL(from: identifier),
+              ["http", "https", "data", "blob"].contains(url.scheme?.lowercased() ?? "") else {
             return
         }
 
@@ -117,7 +196,7 @@ final class FocusableWKWebView: WKWebView {
             }
         }
     }
-    
+
     private func showSaveDialog(
         for localURL: URL,
         suggestedFilename: String,
@@ -125,31 +204,29 @@ final class FocusableWKWebView: WKWebView {
     ) {
         let savePanel = NSSavePanel()
         savePanel.nameFieldStringValue = suggestedFilename
-        
+
         // Set the default directory to Downloads
         if let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first {
             savePanel.directoryURL = downloads
         }
-        
+
         // Set allowed file types for images
         savePanel.allowedContentTypes = allowedContentTypes
-        
+
         // Set the title and message
         savePanel.title = "Save Image"
         savePanel.message = "Choose where to save the image"
-        
+
         // Show the save dialog
         savePanel.begin { [weak self] result in
             if result == .OK, let destinationURL = savePanel.url {
                 do {
                     // Move the downloaded file to the chosen location
                     try FileManager.default.moveItem(at: localURL, to: destinationURL)
-                    print("🔽 [FocusableWKWebView] Image saved to: \(destinationURL.path)")
-                    
+
                     // Show a success notification
                     self?.showSaveSuccessNotification(for: destinationURL)
                 } catch {
-                    print("🔽 [FocusableWKWebView] Failed to save image: \(error.localizedDescription)")
                     self?.showSaveErrorNotification(error: error)
                 }
             } else {
@@ -158,7 +235,7 @@ final class FocusableWKWebView: WKWebView {
             }
         }
     }
-    
+
     private func showSaveSuccessNotification(for url: URL) {
         postUserNotification(
             title: "Image Saved",
@@ -174,9 +251,10 @@ final class FocusableWKWebView: WKWebView {
     }
 
     private func postUserNotification(title: String, message: String) {
-        let center = UNUserNotificationCenter.current()
-        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
-            guard granted else { return }
+        Task {
+            let center = UNUserNotificationCenter.current()
+            let granted = try? await center.requestAuthorization(options: [.alert, .sound])
+            guard granted == true else { return }
 
             let content = UNMutableNotificationContent()
             content.title = title
@@ -188,7 +266,7 @@ final class FocusableWKWebView: WKWebView {
                 content: content,
                 trigger: UNTimeIntervalNotificationTrigger(timeInterval: 0.1, repeats: false)
             )
-            center.add(request, withCompletionHandler: nil)
+            try? await center.add(request)
         }
     }
 
@@ -200,11 +278,11 @@ final class FocusableWKWebView: WKWebView {
         }
 
         if rawValue.hasPrefix("//"),
-           let scheme = owningTab?.url.scheme {
+           let scheme = owningSession?.url.scheme {
             return URL(string: "\(scheme):\(rawValue)")
         }
 
-        if let base = owningTab?.url,
+        if let base = owningSession?.url,
            let resolved = URL(string: rawValue, relativeTo: base)?.absoluteURL {
             return resolved
         }
@@ -215,6 +293,13 @@ final class FocusableWKWebView: WKWebView {
     private func prepareRequest(for url: URL, completion: @escaping (URLRequest) -> Void) {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
+
+        // The page chose this URL. Cookies for any other site would make the save a credentialed
+        // cross-site GET; public CDN media does not need them.
+        guard PageSession.isSameSite(url.host, self.url?.host) else {
+            completion(request)
+            return
+        }
 
         configuration.websiteDataStore.httpCookieStore.getAllCookies { cookies in
             var decoratedRequest = request
@@ -234,21 +319,27 @@ final class FocusableWKWebView: WKWebView {
         originalURL: URL,
         destinationPreference: Download.DestinationPreference
     ) {
-        guard let tab = owningTab else { 
-            print("🔽 [FocusableWKWebView] No owning tab for download")
-            return 
+        guard let tab = owningSession else {
+            return
         }
 
         var enrichedRequest = request
-        if enrichedRequest.value(forHTTPHeaderField: "Referer") == nil {
-            enrichedRequest.setValue(tab.url.absoluteString, forHTTPHeaderField: "Referer")
+        // Origin only, and nothing on an https to http downgrade: the page's path and query stay private.
+        var origin = URLComponents()
+        origin.scheme = tab.url.scheme
+        origin.host = tab.url.host
+        origin.port = tab.url.port
+        origin.path = "/"
+        if enrichedRequest.value(forHTTPHeaderField: "Referer") == nil,
+           tab.url.host != nil,
+           tab.url.scheme == "http" || originalURL.scheme == "https",
+           let referer = origin.string {
+            enrichedRequest.setValue(referer, forHTTPHeaderField: "Referer")
         }
 
-        print("🔽 [FocusableWKWebView] Starting download for: \(originalURL.absoluteString)")
         // Call WKWebView's startDownload method (inherited from WKWebView)
         self.startDownload(using: enrichedRequest) { [weak self] wkDownload in
             guard let self else { return }
-            print("🔽 [FocusableWKWebView] Download started, registering with DownloadManager")
             DispatchQueue.main.async {
                 self.registerDownload(wkDownload, originalURL: originalURL, destinationPreference: destinationPreference)
             }
@@ -260,8 +351,8 @@ final class FocusableWKWebView: WKWebView {
         originalURL: URL,
         destinationPreference: Download.DestinationPreference
     ) {
-        guard let tab = owningTab,
-              let manager = tab.browserManager?.downloadManager else { return }
+        guard owningSession != nil else { return }
+        let manager = DownloadManager.shared
 
         let proposedName = originalURL.lastPathComponent.isEmpty ? "image" : originalURL.lastPathComponent
         _ = manager.addDownload(
@@ -269,7 +360,8 @@ final class FocusableWKWebView: WKWebView {
             originalURL: originalURL,
             suggestedFilename: proposedName,
             destinationPreference: destinationPreference,
-            allowedContentTypes: Self.imageContentTypes
+            allowedContentTypes: Self.imageContentTypes,
+            mediaOnly: true
         )
     }
 
@@ -303,7 +395,6 @@ final class FocusableWKWebView: WKWebView {
         destinationPreference: Download.DestinationPreference
     ) {
         guard let commaIndex = dataURLString.firstIndex(of: ",") else {
-            print("🔽 [FocusableWKWebView] Malformed data URL")
             return
         }
 
@@ -317,7 +408,12 @@ final class FocusableWKWebView: WKWebView {
             .first?
             .lowercased()
 
-        let fileExtension = mimeType.flatMap { mimeTypeToExtension($0) } ?? "img"
+        // The page wrote this URL; without the check "Save Image" would write a .dmg or .command.
+        guard let mimeType, mimeType.hasPrefix("image/") else {
+            return
+        }
+
+        let fileExtension = mimeTypeToExtension(mimeType)
         let suggestedFilename = "image.\(fileExtension)"
 
         let imageData: Data?
@@ -328,7 +424,6 @@ final class FocusableWKWebView: WKWebView {
         }
 
         guard let data = imageData else {
-            print("🔽 [FocusableWKWebView] Unable to decode data URL contents")
             return
         }
 
@@ -338,6 +433,8 @@ final class FocusableWKWebView: WKWebView {
 
         do {
             try data.write(to: tempURL, options: .atomic)
+            // Same quarantine as a network download; the move below carries the attribute along.
+            DownloadManager.setQuarantineAttribute(on: tempURL)
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 switch destinationPreference {
@@ -351,13 +448,11 @@ final class FocusableWKWebView: WKWebView {
                 }
             }
         } catch {
-            print("🔽 [FocusableWKWebView] Failed to materialize data URL: \(error.localizedDescription)")
         }
     }
 
     private func saveTempFileToDownloads(_ tempURL: URL, suggestedName: String) {
         guard let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first else {
-            print("🔽 [FocusableWKWebView] Unable to resolve Downloads directory for data URL save")
             return
         }
 
@@ -375,7 +470,6 @@ final class FocusableWKWebView: WKWebView {
             try FileManager.default.moveItem(at: tempURL, to: destination)
             showSaveSuccessNotification(for: destination)
         } catch {
-            print("🔽 [FocusableWKWebView] Failed to move data URL temp file: \(error.localizedDescription)")
         }
     }
 
@@ -398,36 +492,28 @@ final class FocusableWKWebView: WKWebView {
     }
 
     func contextMenuPayloadDidUpdate(_ payload: WebContextMenuPayload?) {
-        print("🔽 [FocusableWKWebView] contextMenuPayloadDidUpdate called, payload exists: \(payload != nil), payload type: \(payload != nil ? String(describing: payload!) : "nil")")
         pendingPayload = payload
-        let applied = applyPendingContextMenuIfPossible()
-        print("🔽 [FocusableWKWebView] contextMenuPayloadDidUpdate: applyPendingContextMenuIfPossible returned \(applied)")
+        _ = applyPendingContextMenuIfPossible()
     }
 
     private func applyPendingContextMenuIfPossible() -> Bool {
-        print("🔽 [FocusableWKWebView] applyPendingContextMenuIfPossible: pendingPayload exists: \(pendingPayload != nil), pendingMenu exists: \(pendingMenu != nil)")
         guard let payload = pendingPayload,
               payload.shouldProvideCustomMenu,
               let menu = pendingMenu else {
-            print("🔽 [FocusableWKWebView] applyPendingContextMenuIfPossible: GUARD FAILED")
             return false
         }
 
-        print("🔽 [FocusableWKWebView] applyPendingContextMenuIfPossible: Building menu items for payload")
         let items = WebContextMenuItem.buildMenuItems(for: payload, on: self, baseMenu: menu)
-        print("🔽 [FocusableWKWebView] applyPendingContextMenuIfPossible: Built \(items.count) items")
         guard !items.isEmpty else {
-            print("🔽 [FocusableWKWebView] applyPendingContextMenuIfPossible: NO ITEMS BUILT")
             return false
         }
 
-        print("🔽 [FocusableWKWebView] applyPendingContextMenuIfPossible: APPLYING CUSTOM MENU with \(items.count) items")
         menu.items = items
         pendingMenu = nil
         pendingPayload = nil
         contextMenuFallbackWorkItem?.cancel()
         contextMenuFallbackWorkItem = nil
-        owningTab?.pendingContextMenuPayload = nil
+        owningSession?.pendingContextMenuPayload = nil
         return true
     }
 
@@ -443,6 +529,6 @@ final class FocusableWKWebView: WKWebView {
             guard let id = item.identifier else { return true }
             return !identifiersToRemove.contains(id)
         }
-        owningTab?.pendingContextMenuPayload = nil
+        owningSession?.pendingContextMenuPayload = nil
     }
 }

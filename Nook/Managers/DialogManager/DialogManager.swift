@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  DialogManager.swift
 //  Nook
@@ -7,7 +8,8 @@
 
 import Observation
 import SwiftUI
-import UniversalGlass
+import Garnish
+import NookDesign
 
 @MainActor
 @Observable
@@ -15,11 +17,14 @@ class DialogManager {
     var isVisible: Bool = false
     var activeDialog: AnyView?
 
+    private var tabKeyMonitor: Any?
+
     // MARK: - Presentation
 
     func showDialog<Content: View>(_ dialog: Content) {
         activeDialog = AnyView(dialog)
         isVisible = true
+        installTabKeyMonitor()
     }
 
     func showDialog<Content: View>(@ViewBuilder builder: () -> Content) {
@@ -33,8 +38,31 @@ class DialogManager {
         }
 
         isVisible = false
+        removeTabKeyMonitor()
+        // A dialog shown during the fade (a second extension prompt) must not be cleared with it.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard self?.isVisible == false else { return }
             self?.activeDialog = nil
+        }
+    }
+
+    // MARK: - Tab Key Blocking
+
+    private func installTabKeyMonitor() {
+        guard tabKeyMonitor == nil else { return }
+        tabKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            if event.keyCode == 48 {
+                NSSound.beep()
+                return nil
+            }
+            return event
+        }
+    }
+
+    private func removeTabKeyMonitor() {
+        if let monitor = tabKeyMonitor {
+            NSEvent.removeMonitor(monitor)
+            tabKeyMonitor = nil
         }
     }
 
@@ -54,18 +82,14 @@ class DialogManager {
                         Image("nook-logo-1024")
                             .resizable()
                             .scaledToFit()
-                            .frame(width: 26, height: 26)
-                            .shadow(
-                                color: .white.opacity(0.3),
-                                radius: 0.5,
-                                y: 1
-                            )
-                        Text("Are you sure you want to quit Nook?")
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundStyle(.white)
+                            .frame(width: 50, height: 50)
+                            .nookElevation(.raised)
+                        Text("Quit Nook?")
+                            .font(NookDesign.Font.heading)
+                            .foregroundStyle(AppColors.textPrimary)
                         Text("You may lose unsaved work in your tabs.")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.8))
+                            .font(NookDesign.Font.label)
+                            .foregroundStyle(AppColors.textSecondary)
                     }
                     .padding(10)
                 },
@@ -79,13 +103,16 @@ class DialogManager {
                         rightButtons: [
                             DialogButton(
                                 text: "Cancel",
+                                customIcon: AnyView(KeycapLabel("esc")),
                                 variant: .secondary,
+                                keyboardShortcut: .escape,
                                 action: closeDialog
                             ),
                             DialogButton(
                                 text: "Quit",
                                 iconName: "return",
                                 variant: .primary,
+                                keyboardShortcut: .return,
                                 action: onQuit
                             ),
                         ]
@@ -144,15 +171,9 @@ struct DialogCard<Content: View>: View {
 
     var body: some View {
         content
-            .padding(16)
-            .frame(maxWidth: 500, alignment: .leading)
-            .background(BlurEffectView(material: .headerView, state: .active))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .overlay {
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(.white.opacity(0.25), lineWidth: 1)
-            }
-            .shadow(color: .black, radius: 1, y: 0)
+            .padding(NookDesign.Spacing.xl)
+            .frame(maxWidth: NookDesign.Size.dialogMaxWidth, alignment: .leading)
+            .nookFloatingSurface(in: NookDesign.Radius.shape(NookDesign.Radius.xl))
     }
 }
 
@@ -214,17 +235,12 @@ struct DialogHeader: View {
         HStack(spacing: 16) {
             ZStack {
                 Circle()
-                    .fill(gradientColorManager.primaryColor.opacity(0.1))
-                    .universalGlassEffect(
-                        .clear.tint(
-                            gradientColorManager.primaryColor.opacity(0.2)
-                        )
-                    )
+                    .fill(gradientColorManager.accentColor.opacity(0.1))
                     .frame(width: 48, height: 48)
 
                 Image(systemName: icon)
-                    .font(.system(size: 25, weight: .semibold))
-                    .foregroundStyle(gradientColorManager.primaryColor).frame(
+                    .font(NookDesign.Font.titleLarge)
+                    .foregroundStyle(gradientColorManager.accentColor).frame(
                         width: 48,
                         height: 48
                     )
@@ -232,12 +248,12 @@ struct DialogHeader: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(NookDesign.Font.heading)
                     .foregroundStyle(.primary)
 
                 if let subtitle = subtitle {
                     Text(subtitle)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(NookDesign.Font.body)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -261,62 +277,26 @@ struct DialogFooter: View {
     var body: some View {
         HStack {
             if let leftButton = leftButton {
-                if let iconName = leftButton.iconName {
-                    Button(leftButton.text, action: leftButton.action)
-                        .buttonStyle(
-                            DialogButtonStyle(
-                                variant: leftButton.variant,
-                                icon: leftButton.iconName.map {
-                                    AnyView(Image(systemName: $0))
-                                },
-                                iconPosition: .trailing
-                            )
+                Button(leftButton.text, action: leftButton.action)
+                    .buttonStyle(
+                        DialogButtonStyle(
+                            variant: leftButton.variant,
+                            icon: leftButton.resolvedIcon,
+                            iconPosition: .trailing
                         )
-                        .conditionally(if: OSVersion.supportsGlassEffect) {
-                            View in
-                            View
-                                .tint(
-                                    Color("plainBackgroundColor").opacity(
-                                        colorScheme == .light ? 0.8 : 0.4
-                                    )
-                                )
-                        }
-                        .controlSize(.extraLarge)
-
-                        .disabled(!leftButton.isEnabled)
-                        .modifier(
-                            OptionalKeyboardShortcut(
-                                shortcut: leftButton.keyboardShortcut
-                            )
+                    )
+                    .tint(
+                        Color("plainBackgroundColor").opacity(
+                            colorScheme == .light ? 0.8 : 0.4
                         )
-                } else {
-                    Button(leftButton.text, action: leftButton.action)
-                        .buttonStyle(
-                            DialogButtonStyle(
-                                variant: leftButton.variant,
-                                icon: leftButton.iconName.map {
-                                    AnyView(Image(systemName: $0))
-                                },
-                                iconPosition: .trailing
-                            )
+                    )
+                    .controlSize(.extraLarge)
+                    .disabled(!leftButton.isEnabled)
+                    .modifier(
+                        OptionalKeyboardShortcut(
+                            shortcut: leftButton.keyboardShortcut
                         )
-                        .conditionally(if: OSVersion.supportsGlassEffect) {
-                            View in
-                            View
-                                .tint(
-                                    Color("plainBackgroundColor").opacity(
-                                        colorScheme == .light ? 0.8 : 0.4
-                                    )
-                                )
-                        }
-                        .controlSize(.extraLarge)
-                        .disabled(!leftButton.isEnabled)
-                        .modifier(
-                            OptionalKeyboardShortcut(
-                                shortcut: leftButton.keyboardShortcut
-                            )
-                        )
-                }
+                    )
             }
 
             Spacer()
@@ -329,9 +309,7 @@ struct DialogFooter: View {
                         .buttonStyle(
                             DialogButtonStyle(
                                 variant: button.variant,
-                                icon: button.iconName.map {
-                                    AnyView(Image(systemName: $0))
-                                },
+                                icon: button.resolvedIcon,
                                 iconPosition: .trailing
                             )
                         )
@@ -351,15 +329,23 @@ struct DialogFooter: View {
 struct DialogButton {
     let text: String
     let iconName: String?
+    let customIcon: AnyView?
     let variant: DialogButtonStyleVariant
     let action: () -> Void
     let keyboardShortcut: KeyEquivalent?
     let shadowStyle: NookButtonStyle.ShadowStyle
     let isEnabled: Bool
 
+    /// The resolved icon view: customIcon takes priority, then iconName as SF Symbol
+    var resolvedIcon: AnyView? {
+        if let customIcon { return customIcon }
+        return iconName.map { AnyView(Image(systemName: $0)) }
+    }
+
     init(
         text: String,
         iconName: String? = nil,
+        customIcon: AnyView? = nil,
         variant: DialogButtonStyleVariant = .secondary,
         keyboardShortcut: KeyEquivalent? = nil,
         shadowStyle: NookButtonStyle.ShadowStyle = .subtle,
@@ -368,6 +354,7 @@ struct DialogButton {
     ) {
         self.text = text
         self.iconName = iconName
+        self.customIcon = customIcon
         self.variant = variant
         self.action = action
         self.keyboardShortcut = keyboardShortcut
@@ -395,6 +382,7 @@ enum DialogButtonStyleVariant {
 }
 
 struct DialogButtonStyle: ButtonStyle {
+    @EnvironmentObject var gradientColorManager: GradientColorManager
     var variant: DialogButtonStyleVariant = .primary
     var icon: AnyView?
     var iconPosition: IconPosition = .trailing
@@ -409,20 +397,22 @@ struct DialogButtonStyle: ButtonStyle {
         bottom: 10,
         trailing: 16
     )
-    private let cornerRadius: CGFloat = 10
+    private let cornerRadius: CGFloat = NookDesign.Radius.md
 
     private var backgroundColor: Color {
         switch variant {
-        case .primary: return Color(hex: "DDDDDD")
-        case .secondary: return .white.opacity(0.07)
-        case .danger: return Color(hex: "F60000")
+        // A fixed light fill with black text read as white on white in dark mode. The accent
+        // carries the primary action, and the secondary sits on the same fill rows use.
+        case .primary: return gradientColorManager.accentColor
+        case .secondary: return NookDesign.Surface.fill
+        case .danger: return NookDesign.Surface.danger
         }
     }
 
     private var foregroundColor: Color {
         switch variant {
-        case .primary: return .black
-        case .secondary: return .white
+        case .primary: return Garnish.contrastingShade(of: gradientColorManager.accentColor, targetRatio: 4.5, blendStyle: .strong) ?? .white
+        case .secondary: return .primary
         case .danger: return .white
         }
     }
@@ -434,7 +424,7 @@ struct DialogButtonStyle: ButtonStyle {
             }
 
             configuration.label
-                .font(.system(size: 13, weight: .medium))
+                .font(NookDesign.Font.body)
 
             if iconPosition == .trailing, let icon = icon {
                 icon
@@ -443,9 +433,28 @@ struct DialogButtonStyle: ButtonStyle {
         .padding(padding)
         .background(backgroundColor)
         .foregroundColor(foregroundColor)
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+        .clipShape(NookDesign.Radius.shape(cornerRadius))
         .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
         .opacity(configuration.isPressed ? 0.8 : 1.0)
-        .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
+        .animation(NookDesign.Motion.quick, value: configuration.isPressed)
+    }
+}
+
+/// A small rounded badge for displaying keyboard shortcut hints (e.g. "esc", "tab")
+struct KeycapLabel: View {
+    let text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    var body: some View {
+        Text(text.uppercased())
+            .font(NookDesign.Font.caption)
+            .fontDesign(.rounded)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(NookDesign.Surface.fill)
+            .clipShape(NookDesign.Radius.shape(NookDesign.Radius.xs))
     }
 }

@@ -8,25 +8,36 @@
 
 /* Begin PBXBuildFile section */
 		2C16A0262E87430B0070894B /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 2C16A0252E87430B0070894B /* Sparkle */; };
-		2D0822D82EC8A61800C302AC /* UniversalGlass in Frameworks */ = {isa = PBXBuildFile; productRef = 2D0822D72EC8A61800C302AC /* UniversalGlass */; };
-		3600212C2EC6EADB0016A41E /* ComplexModule in Frameworks */ = {isa = PBXBuildFile; productRef = 3600212B2EC6EADB0016A41E /* ComplexModule */; };
-		3600212E2EC6EADB0016A41E /* Numerics in Frameworks */ = {isa = PBXBuildFile; productRef = 3600212D2EC6EADB0016A41E /* Numerics */; };
-		360021302EC6EADB0016A41E /* RealModule in Frameworks */ = {isa = PBXBuildFile; productRef = 3600212F2EC6EADB0016A41E /* RealModule */; };
-		360021332EC6EAEB0016A41E /* Atomics in Frameworks */ = {isa = PBXBuildFile; productRef = 360021322EC6EAEB0016A41E /* Atomics */; };
-		360021362EC6EC150016A41E /* Highlightr in Frameworks */ = {isa = PBXBuildFile; productRef = 360021352EC6EC150016A41E /* Highlightr */; };
-		360021392EC6EC2F0016A41E /* Fuzi in Frameworks */ = {isa = PBXBuildFile; productRef = 360021382EC6EC2F0016A41E /* Fuzi */; };
-		3600213C2EC6EC450016A41E /* Reeeed in Frameworks */ = {isa = PBXBuildFile; productRef = 3600213B2EC6EC450016A41E /* Reeeed */; };
-		3600213F2EC6EC710016A41E /* LRUCache in Frameworks */ = {isa = PBXBuildFile; productRef = 3600213E2EC6EC710016A41E /* LRUCache */; };
-		360021422EC6EC7F0016A41E /* Graphing in Frameworks */ = {isa = PBXBuildFile; productRef = 360021412EC6EC7F0016A41E /* Graphing */; };
-		360021442EC6EC7F0016A41E /* Motion in Frameworks */ = {isa = PBXBuildFile; productRef = 360021432EC6EC7F0016A41E /* Motion */; };
+		3600212C2EC6EADB0016A41E /* (null) in Frameworks */ = {isa = PBXBuildFile; };
+		3600212E2EC6EADB0016A41E /* (null) in Frameworks */ = {isa = PBXBuildFile; };
+		360021302EC6EADB0016A41E /* (null) in Frameworks */ = {isa = PBXBuildFile; };
+		360021332EC6EAEB0016A41E /* (null) in Frameworks */ = {isa = PBXBuildFile; };
+		360021392EC6EC2F0016A41E /* (null) in Frameworks */ = {isa = PBXBuildFile; };
+		3600213C2EC6EC450016A41E /* (null) in Frameworks */ = {isa = PBXBuildFile; };
+		3600213F2EC6EC710016A41E /* (null) in Frameworks */ = {isa = PBXBuildFile; };
+		360021422EC6EC7F0016A41E /* (null) in Frameworks */ = {isa = PBXBuildFile; };
+		360021442EC6EC7F0016A41E /* (null) in Frameworks */ = {isa = PBXBuildFile; };
 		564997D82E9B24CC00D89F78 /* Garnish in Frameworks */ = {isa = PBXBuildFile; productRef = 564997D72E9B24CC00D89F78 /* Garnish */; };
-		56C82BA92E9C2DB500DDD0D6 /* UniversalGlass in Frameworks */ = {isa = PBXBuildFile; productRef = 56C82BA82E9C2DB500DDD0D6 /* UniversalGlass */; };
 		7FAFC5DA2E3ADDCD009D7DC4 /* FaviconFinder in Frameworks */ = {isa = PBXBuildFile; productRef = 7FAFC5D92E3ADDCD009D7DC4 /* FaviconFinder */; };
-		7FE9E0EB2EE59D3500584E16 /* ColorfulX in Frameworks */ = {isa = PBXBuildFile; productRef = 7FE9E0EA2EE59D3500584E16 /* ColorfulX */; };
+		C0DE7AB50000000000000003 /* NookTabsCore in Frameworks */ = {isa = PBXBuildFile; productRef = C0DE7AB50000000000000002 /* NookTabsCore */; };
+		C0DE7AB50000000000000013 /* NookSettings in Frameworks */ = {isa = PBXBuildFile; productRef = C0DE7AB50000000000000012 /* NookSettings */; };
+		C0DE7AB50000000000000023 /* NookDesign in Frameworks */ = {isa = PBXBuildFile; productRef = C0DE7AB50000000000000022 /* NookDesign */; };
+		C0DE7AB50000000000000033 /* NookBlocker in Frameworks */ = {isa = PBXBuildFile; productRef = C0DE7AB50000000000000032 /* NookBlocker */; };
+		C0DE7AB50000000000000043 /* NookTweaks in Frameworks */ = {isa = PBXBuildFile; productRef = C0DE7AB50000000000000042 /* NookTweaks */; };
+		C0DE7AB50000000000000053 /* NookWeb in Frameworks */ = {isa = PBXBuildFile; productRef = C0DE7AB50000000000000052 /* NookWeb */; };
+		C0DE7AB50000000000000063 /* NookUI in Frameworks */ = {isa = PBXBuildFile; productRef = C0DE7AB50000000000000062 /* NookUI */; };
+		105000000000000000000200 /* NookTabsCore in Frameworks */ = {isa = PBXBuildFile; productRef = 105000000000000000000100 /* NookTabsCore */; };
+		105000000000000000000201 /* NookSettings in Frameworks */ = {isa = PBXBuildFile; productRef = 105000000000000000000101 /* NookSettings */; };
+		105000000000000000000202 /* NookDesign in Frameworks */ = {isa = PBXBuildFile; productRef = 105000000000000000000102 /* NookDesign */; };
+		105000000000000000000203 /* NookBlocker in Frameworks */ = {isa = PBXBuildFile; productRef = 105000000000000000000103 /* NookBlocker */; };
+		105000000000000000000204 /* NookTweaks in Frameworks */ = {isa = PBXBuildFile; productRef = 105000000000000000000104 /* NookTweaks */; };
+		105000000000000000000205 /* NookWeb in Frameworks */ = {isa = PBXBuildFile; productRef = 105000000000000000000105 /* NookWeb */; };
+		105000000000000000000206 /* NookUI in Frameworks */ = {isa = PBXBuildFile; productRef = 105000000000000000000106 /* NookUI */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		7F8340FC2E37F39400674A5D /* Nook.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Nook.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		105000000000000000000009 /* NookiOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NookiOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -34,16 +45,24 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
+				ThirdParty/AdblockRustFFI/Cargo.lock,
+				ThirdParty/AdblockRustFFI/Cargo.toml,
+				ThirdParty/AdblockRustFFI/README.md,
+				ThirdParty/AdblockRustFFI/build.sh,
+				ThirdParty/AdblockRustFFI/include/nook_adblock.h,
+				ThirdParty/AdblockRustFFI/include/module.modulemap,
+				ThirdParty/AdblockRustFFI/NookAdblock.xcframework,
+				ThirdParty/AdblockRustFFI/src/content_blocking_ffi.rs,
+				ThirdParty/AdblockRustFFI/src/cosmetic_ffi.rs,
+				ThirdParty/AdblockRustFFI/src/lib.rs,
+				ThirdParty/AdblockRustFFI/tests/no_overbroad_rules.rs,
 				ThirdParty/BigUIPaging/README.md,
-				ThirdParty/HTSymbolHook/README.md,
-				ThirdParty/MuteableWKWebView/README.md,
 			);
 			target = 7F8340FB2E37F39400674A5D /* Nook */;
 		};
 		2D0834BF2EC8CE1300C302AC /* Exceptions for "CommandPalette" folder in "Nook" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				"CommandPalette Accessories/CommandPaletteSuggestionView.swift",
 				"CommandPalette Accessories/GenericSuggestionItem.swift",
 				"CommandPalette Accessories/HistorySuggestionItem.swift",
 				"CommandPalette Accessories/TabSuggestionItem.swift",
@@ -57,12 +76,16 @@
 			membershipExceptions = (
 				Sidebar/SidebarBottomBar.swift,
 				Sidebar/SidebarHeader.swift,
-				Sidebar/SpaceContextMenu.swift,
-				Sidebar/SpacesList/SpacesList.swift,
-				Sidebar/SpacesList/SpacesListItem.swift,
 				Sidebar/SpacesSideBarView.swift,
 			);
 			target = 7F8340FB2E37F39400674A5D /* Nook */;
+		};
+		105000000000000000000010 /* Exceptions for "NookiOS" folder in "NookiOS" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 105000000000000000000001 /* NookiOS */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -106,6 +129,19 @@
 			path = UI;
 			sourceTree = "<group>";
 		};
+		7F6409912F4729B600A02697 /* Onboarding */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Onboarding;
+			sourceTree = "<group>";
+		};
+		105000000000000000000002 /* NookiOS */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				105000000000000000000010 /* Exceptions for "NookiOS" folder in "NookiOS" target */,
+			);
+			path = NookiOS;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -113,22 +149,39 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				360021442EC6EC7F0016A41E /* Motion in Frameworks */,
-				3600213C2EC6EC450016A41E /* Reeeed in Frameworks */,
-				3600213F2EC6EC710016A41E /* LRUCache in Frameworks */,
+				360021442EC6EC7F0016A41E /* (null) in Frameworks */,
+				3600213C2EC6EC450016A41E /* (null) in Frameworks */,
+				3600213F2EC6EC710016A41E /* (null) in Frameworks */,
 				564997D82E9B24CC00D89F78 /* Garnish in Frameworks */,
-				56C82BA92E9C2DB500DDD0D6 /* UniversalGlass in Frameworks */,
 				7FAFC5DA2E3ADDCD009D7DC4 /* FaviconFinder in Frameworks */,
-				360021302EC6EADB0016A41E /* RealModule in Frameworks */,
-				7FE9E0EB2EE59D3500584E16 /* ColorfulX in Frameworks */,
-				360021392EC6EC2F0016A41E /* Fuzi in Frameworks */,
+				360021302EC6EADB0016A41E /* (null) in Frameworks */,
+				360021392EC6EC2F0016A41E /* (null) in Frameworks */,
 				2C16A0262E87430B0070894B /* Sparkle in Frameworks */,
-				360021362EC6EC150016A41E /* Highlightr in Frameworks */,
-				360021422EC6EC7F0016A41E /* Graphing in Frameworks */,
-				3600212C2EC6EADB0016A41E /* ComplexModule in Frameworks */,
-				2D0822D82EC8A61800C302AC /* UniversalGlass in Frameworks */,
-				3600212E2EC6EADB0016A41E /* Numerics in Frameworks */,
-				360021332EC6EAEB0016A41E /* Atomics in Frameworks */,
+				360021422EC6EC7F0016A41E /* (null) in Frameworks */,
+				3600212C2EC6EADB0016A41E /* (null) in Frameworks */,
+				3600212E2EC6EADB0016A41E /* (null) in Frameworks */,
+				360021332EC6EAEB0016A41E /* (null) in Frameworks */,
+				C0DE7AB50000000000000003 /* NookTabsCore in Frameworks */,
+				C0DE7AB50000000000000013 /* NookSettings in Frameworks */,
+				C0DE7AB50000000000000023 /* NookDesign in Frameworks */,
+				C0DE7AB50000000000000033 /* NookBlocker in Frameworks */,
+				C0DE7AB50000000000000043 /* NookTweaks in Frameworks */,
+				C0DE7AB50000000000000053 /* NookWeb in Frameworks */,
+				C0DE7AB50000000000000063 /* NookUI in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		105000000000000000000004 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				105000000000000000000200 /* NookTabsCore in Frameworks */,
+				105000000000000000000201 /* NookSettings in Frameworks */,
+				105000000000000000000202 /* NookDesign in Frameworks */,
+				105000000000000000000203 /* NookBlocker in Frameworks */,
+				105000000000000000000204 /* NookTweaks in Frameworks */,
+				105000000000000000000205 /* NookWeb in Frameworks */,
+				105000000000000000000206 /* NookUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -138,6 +191,8 @@
 		7F8340F32E37F39400674A5D = {
 			isa = PBXGroup;
 			children = (
+				105000000000000000000002 /* NookiOS */,
+				7F6409912F4729B600A02697 /* Onboarding */,
 				2D0834C72EC8D90400C302AC /* Settings */,
 				2D0834CF2EC8E0AD00C302AC /* Navigation */,
 				2D0834BE2EC8CE0C00C302AC /* CommandPalette */,
@@ -151,6 +206,7 @@
 		7F8340FD2E37F39400674A5D /* Products */ = {
 			isa = PBXGroup;
 			children = (
+				105000000000000000000009 /* NookiOS.app */,
 				7F8340FC2E37F39400674A5D /* Nook.app */,
 			);
 			name = Products;
@@ -176,27 +232,52 @@
 				2D0834B32EC8C43B00C302AC /* App */,
 				2D0834C72EC8D90400C302AC /* Settings */,
 				564997D02E9B125200D89F78 /* UI */,
+				7F6409912F4729B600A02697 /* Onboarding */,
 			);
 			name = Nook;
 			packageProductDependencies = (
 				7FAFC5D92E3ADDCD009D7DC4 /* FaviconFinder */,
 				2C16A0252E87430B0070894B /* Sparkle */,
 				564997D72E9B24CC00D89F78 /* Garnish */,
-				3600212B2EC6EADB0016A41E /* ComplexModule */,
-				3600212D2EC6EADB0016A41E /* Numerics */,
-				3600212F2EC6EADB0016A41E /* RealModule */,
-				360021322EC6EAEB0016A41E /* Atomics */,
-				360021352EC6EC150016A41E /* Highlightr */,
-				360021382EC6EC2F0016A41E /* Fuzi */,
-				3600213B2EC6EC450016A41E /* Reeeed */,
-				3600213E2EC6EC710016A41E /* LRUCache */,
-				360021412EC6EC7F0016A41E /* Graphing */,
-				360021432EC6EC7F0016A41E /* Motion */,
-				2D0822D72EC8A61800C302AC /* UniversalGlass */,
-				7FE9E0EA2EE59D3500584E16 /* ColorfulX */,
+				C0DE7AB50000000000000002 /* NookTabsCore */,
+				C0DE7AB50000000000000012 /* NookSettings */,
+				C0DE7AB50000000000000022 /* NookDesign */,
+				C0DE7AB50000000000000032 /* NookBlocker */,
+				C0DE7AB50000000000000042 /* NookTweaks */,
+				C0DE7AB50000000000000052 /* NookWeb */,
+				C0DE7AB50000000000000062 /* NookUI */,
 			);
 			productName = Pulse;
 			productReference = 7F8340FC2E37F39400674A5D /* Nook.app */;
+			productType = "com.apple.product-type.application";
+		};
+		105000000000000000000001 /* NookiOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 105000000000000000000006 /* Build configuration list for PBXNativeTarget "NookiOS" */;
+			buildPhases = (
+				105000000000000000000003 /* Sources */,
+				105000000000000000000004 /* Frameworks */,
+				105000000000000000000005 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				105000000000000000000002 /* NookiOS */,
+			);
+			name = NookiOS;
+			packageProductDependencies = (
+				105000000000000000000100 /* NookTabsCore */,
+				105000000000000000000101 /* NookSettings */,
+				105000000000000000000102 /* NookDesign */,
+				105000000000000000000103 /* NookBlocker */,
+				105000000000000000000104 /* NookTweaks */,
+				105000000000000000000105 /* NookWeb */,
+				105000000000000000000106 /* NookUI */,
+			);
+			productName = NookiOS;
+			productReference = 105000000000000000000009 /* NookiOS.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -227,15 +308,13 @@
 				7FAFC5D82E3ADDCD009D7DC4 /* XCRemoteSwiftPackageReference "FaviconFinder" */,
 				2C16A0242E87430B0070894B /* XCRemoteSwiftPackageReference "Sparkle" */,
 				564997D62E9B24CC00D89F78 /* XCRemoteSwiftPackageReference "Garnish" */,
-				3600212A2EC6EADB0016A41E /* XCRemoteSwiftPackageReference "swift-numerics" */,
-				360021312EC6EAEB0016A41E /* XCRemoteSwiftPackageReference "swift-atomics" */,
-				360021342EC6EC150016A41E /* XCRemoteSwiftPackageReference "Highlightr" */,
-				360021372EC6EC2F0016A41E /* XCRemoteSwiftPackageReference "Fuzi" */,
-				3600213A2EC6EC450016A41E /* XCRemoteSwiftPackageReference "reeeed" */,
-				3600213D2EC6EC710016A41E /* XCRemoteSwiftPackageReference "LRUCache" */,
-				360021402EC6EC7F0016A41E /* XCRemoteSwiftPackageReference "Motion" */,
-				2D0822D62EC8A61800C302AC /* XCRemoteSwiftPackageReference "universalglass" */,
-				7FE9E0E92EE59D3500584E16 /* XCRemoteSwiftPackageReference "ColorfulX" */,
+				C0DE7AB50000000000000001 /* XCLocalSwiftPackageReference "Packages/NookTabsCore" */,
+				C0DE7AB50000000000000011 /* XCLocalSwiftPackageReference "Packages/NookSettings" */,
+				C0DE7AB50000000000000021 /* XCLocalSwiftPackageReference "Packages/NookDesign" */,
+				C0DE7AB50000000000000031 /* XCLocalSwiftPackageReference "Packages/NookBlocker" */,
+				C0DE7AB50000000000000041 /* XCLocalSwiftPackageReference "Packages/NookTweaks" */,
+				C0DE7AB50000000000000051 /* XCLocalSwiftPackageReference "Packages/NookWeb" */,
+				C0DE7AB50000000000000061 /* XCLocalSwiftPackageReference "Packages/NookUI" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 7F8340FD2E37F39400674A5D /* Products */;
@@ -243,6 +322,7 @@
 			projectRoot = "";
 			targets = (
 				7F8340FB2E37F39400674A5D /* Nook */,
+				105000000000000000000001 /* NookiOS */,
 			);
 		};
 /* End PBXProject section */
@@ -255,10 +335,24 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		105000000000000000000005 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		7F8340F82E37F39400674A5D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		105000000000000000000003 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -322,7 +416,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MACOSX_DEPLOYMENT_TARGET = 15.5;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -368,6 +462,8 @@
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 96M8ZZRJK6;
+				CLANG_COVERAGE_MAPPING = NO;
+				ENABLE_CODE_COVERAGE = NO;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -380,7 +476,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MACOSX_DEPLOYMENT_TARGET = 15.5;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = macosx;
@@ -391,15 +487,18 @@
 		7F8341092E37F39500674A5D /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_COVERAGE_MAPPING = NO;
+				ENABLE_CODE_COVERAGE = NO;
 				ASSETCATALOG_COMPILER_APPICON_NAME = "logo-dev";
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_ENTITLEMENTS = Nook/Nook.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 105;
-				DEVELOPMENT_TEAM = 9DLM793N9T;
+				CURRENT_PROJECT_VERSION = 117;
+				DEVELOPMENT_TEAM = ZHB786H6YN;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
@@ -414,8 +513,8 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.5;
-				PRODUCT_BUNDLE_IDENTIFIER = io.browsewithnook.nook;
+				MARKETING_VERSION = 1.2.3;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gstudios.nook;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				REGISTER_APP_GROUPS = YES;
@@ -426,7 +525,6 @@
 				RUNTIME_EXCEPTION_DISABLE_EXECUTABLE_PAGE_PROTECTION = YES;
 				RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_OBJC_BRIDGING_HEADER = "$(PROJECT_DIR)/Nook/Supporting Files/Nook-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
@@ -439,10 +537,11 @@
 				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_ENTITLEMENTS = Nook/Nook.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 105;
-				DEVELOPMENT_TEAM = 9DLM793N9T;
+				CURRENT_PROJECT_VERSION = 117;
+				DEVELOPMENT_TEAM = ZHB786H6YN;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
@@ -462,20 +561,83 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.5;
-				PRODUCT_BUNDLE_IDENTIFIER = io.browsewithnook.nook;
+				MARKETING_VERSION = 1.2.3;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gstudios.nook;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				REGISTER_APP_GROUPS = YES;
-				RUNTIME_EXCEPTION_ALLOW_DYLD_ENVIRONMENT_VARIABLES = YES;
-				RUNTIME_EXCEPTION_ALLOW_JIT = YES;
+				RUNTIME_EXCEPTION_ALLOW_DYLD_ENVIRONMENT_VARIABLES = NO;
+				RUNTIME_EXCEPTION_ALLOW_JIT = NO;
 				RUNTIME_EXCEPTION_ALLOW_UNSIGNED_EXECUTABLE_MEMORY = NO;
 				RUNTIME_EXCEPTION_DEBUGGING_TOOL = NO;
 				RUNTIME_EXCEPTION_DISABLE_EXECUTABLE_PAGE_PROTECTION = NO;
-				RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION = YES;
+				RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_OBJC_BRIDGING_HEADER = "$(PROJECT_DIR)/Nook/Supporting Files/Nook-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		105000000000000000000007 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_COVERAGE_MAPPING = NO;
+				ENABLE_CODE_COVERAGE = NO;
+				ASSETCATALOG_COMPILER_APPICON_NAME = logo;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = NookiOS/NookiOS.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+				DEVELOPMENT_TEAM = ZHB786H6YN;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = NookiOS/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Nook;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gstudios.nook;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		105000000000000000000008 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = logo;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = NookiOS/NookiOS.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+				DEVELOPMENT_TEAM = ZHB786H6YN;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = NookiOS/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Nook;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gstudios.nook;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				SWIFT_COMPILATION_MODE = wholemodule;
 			};
 			name = Release;
 		};
@@ -500,7 +662,47 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		105000000000000000000006 /* Build configuration list for PBXNativeTarget "NookiOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				105000000000000000000007 /* Debug */,
+				105000000000000000000008 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		C0DE7AB50000000000000001 /* XCLocalSwiftPackageReference "Packages/NookTabsCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/NookTabsCore;
+		};
+		C0DE7AB50000000000000011 /* XCLocalSwiftPackageReference "Packages/NookSettings" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/NookSettings;
+		};
+		C0DE7AB50000000000000021 /* XCLocalSwiftPackageReference "Packages/NookDesign" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/NookDesign;
+		};
+		C0DE7AB50000000000000031 /* XCLocalSwiftPackageReference "Packages/NookBlocker" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/NookBlocker;
+		};
+		C0DE7AB50000000000000041 /* XCLocalSwiftPackageReference "Packages/NookTweaks" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/NookTweaks;
+		};
+		C0DE7AB50000000000000051 /* XCLocalSwiftPackageReference "Packages/NookWeb" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/NookWeb;
+		};
+		C0DE7AB50000000000000061 /* XCLocalSwiftPackageReference "Packages/NookUI" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/NookUI;
+		};
+/* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
 		2C16A0242E87430B0070894B /* XCRemoteSwiftPackageReference "Sparkle" */ = {
@@ -511,84 +713,12 @@
 				minimumVersion = 2.8.0;
 			};
 		};
-		2D0822D62EC8A61800C302AC /* XCRemoteSwiftPackageReference "universalglass" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/aeastr/universalglass.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 1.0.0;
-			};
-		};
-		3600212A2EC6EADB0016A41E /* XCRemoteSwiftPackageReference "swift-numerics" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/apple/swift-numerics.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 1.1.1;
-			};
-		};
-		360021312EC6EAEB0016A41E /* XCRemoteSwiftPackageReference "swift-atomics" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/apple/swift-atomics.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 1.3.0;
-			};
-		};
-		360021342EC6EC150016A41E /* XCRemoteSwiftPackageReference "Highlightr" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/raspu/Highlightr/";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 2.3.0;
-			};
-		};
-		360021372EC6EC2F0016A41E /* XCRemoteSwiftPackageReference "Fuzi" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/cezheng/Fuzi";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 3.1.3;
-			};
-		};
-		3600213A2EC6EC450016A41E /* XCRemoteSwiftPackageReference "reeeed" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/nate-parrott/reeeed";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 1.0.1;
-			};
-		};
-		3600213D2EC6EC710016A41E /* XCRemoteSwiftPackageReference "LRUCache" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/nicklockwood/LRUCache.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 1.2.0;
-			};
-		};
-		360021402EC6EC7F0016A41E /* XCRemoteSwiftPackageReference "Motion" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/b3ll/Motion";
-			requirement = {
-				branch = main;
-				kind = branch;
-			};
-		};
 		564997D62E9B24CC00D89F78 /* XCRemoteSwiftPackageReference "Garnish" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/Aeastr/Garnish";
 			requirement = {
-				branch = main;
-				kind = branch;
-			};
-		};
-		56C82BA72E9C2DB500DDD0D6 /* XCRemoteSwiftPackageReference "UniversalGlass" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/Aeastr/UniversalGlass";
-			requirement = {
-				branch = main;
-				kind = branch;
+				kind = revision;
+				revision = ffbd0091ed25eb3e250ca47b5ccc8c4f9a6a3420;
 			};
 		};
 		7FAFC5D82E3ADDCD009D7DC4 /* XCRemoteSwiftPackageReference "FaviconFinder" */ = {
@@ -599,14 +729,6 @@
 				minimumVersion = 5.1.4;
 			};
 		};
-		7FE9E0E92EE59D3500584E16 /* XCRemoteSwiftPackageReference "ColorfulX" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/Lakr233/ColorfulX.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 6.0.2;
-			};
-		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -615,80 +737,71 @@
 			package = 2C16A0242E87430B0070894B /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
 		};
-		2D0822D72EC8A61800C302AC /* UniversalGlass */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 2D0822D62EC8A61800C302AC /* XCRemoteSwiftPackageReference "universalglass" */;
-			productName = UniversalGlass;
-		};
-		3600212B2EC6EADB0016A41E /* ComplexModule */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 3600212A2EC6EADB0016A41E /* XCRemoteSwiftPackageReference "swift-numerics" */;
-			productName = ComplexModule;
-		};
-		3600212D2EC6EADB0016A41E /* Numerics */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 3600212A2EC6EADB0016A41E /* XCRemoteSwiftPackageReference "swift-numerics" */;
-			productName = Numerics;
-		};
-		3600212F2EC6EADB0016A41E /* RealModule */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 3600212A2EC6EADB0016A41E /* XCRemoteSwiftPackageReference "swift-numerics" */;
-			productName = RealModule;
-		};
-		360021322EC6EAEB0016A41E /* Atomics */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 360021312EC6EAEB0016A41E /* XCRemoteSwiftPackageReference "swift-atomics" */;
-			productName = Atomics;
-		};
-		360021352EC6EC150016A41E /* Highlightr */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 360021342EC6EC150016A41E /* XCRemoteSwiftPackageReference "Highlightr" */;
-			productName = Highlightr;
-		};
-		360021382EC6EC2F0016A41E /* Fuzi */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 360021372EC6EC2F0016A41E /* XCRemoteSwiftPackageReference "Fuzi" */;
-			productName = Fuzi;
-		};
-		3600213B2EC6EC450016A41E /* Reeeed */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 3600213A2EC6EC450016A41E /* XCRemoteSwiftPackageReference "reeeed" */;
-			productName = Reeeed;
-		};
-		3600213E2EC6EC710016A41E /* LRUCache */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 3600213D2EC6EC710016A41E /* XCRemoteSwiftPackageReference "LRUCache" */;
-			productName = LRUCache;
-		};
-		360021412EC6EC7F0016A41E /* Graphing */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 360021402EC6EC7F0016A41E /* XCRemoteSwiftPackageReference "Motion" */;
-			productName = Graphing;
-		};
-		360021432EC6EC7F0016A41E /* Motion */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 360021402EC6EC7F0016A41E /* XCRemoteSwiftPackageReference "Motion" */;
-			productName = Motion;
-		};
 		564997D72E9B24CC00D89F78 /* Garnish */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 564997D62E9B24CC00D89F78 /* XCRemoteSwiftPackageReference "Garnish" */;
 			productName = Garnish;
-		};
-		56C82BA82E9C2DB500DDD0D6 /* UniversalGlass */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 56C82BA72E9C2DB500DDD0D6 /* XCRemoteSwiftPackageReference "UniversalGlass" */;
-			productName = UniversalGlass;
 		};
 		7FAFC5D92E3ADDCD009D7DC4 /* FaviconFinder */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 7FAFC5D82E3ADDCD009D7DC4 /* XCRemoteSwiftPackageReference "FaviconFinder" */;
 			productName = FaviconFinder;
 		};
-		7FE9E0EA2EE59D3500584E16 /* ColorfulX */ = {
+		C0DE7AB50000000000000002 /* NookTabsCore */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 7FE9E0E92EE59D3500584E16 /* XCRemoteSwiftPackageReference "ColorfulX" */;
-			productName = ColorfulX;
+			productName = NookTabsCore;
+		};
+		C0DE7AB50000000000000012 /* NookSettings */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NookSettings;
+		};
+		C0DE7AB50000000000000022 /* NookDesign */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NookDesign;
+		};
+		C0DE7AB50000000000000032 /* NookBlocker */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NookBlocker;
+		};
+		C0DE7AB50000000000000042 /* NookTweaks */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NookTweaks;
+		};
+		C0DE7AB50000000000000052 /* NookWeb */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NookWeb;
+		};
+		C0DE7AB50000000000000062 /* NookUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NookUI;
+		};
+		105000000000000000000100 /* NookTabsCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NookTabsCore;
+		};
+		105000000000000000000101 /* NookSettings */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NookSettings;
+		};
+		105000000000000000000102 /* NookDesign */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NookDesign;
+		};
+		105000000000000000000103 /* NookBlocker */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NookBlocker;
+		};
+		105000000000000000000104 /* NookTweaks */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NookTweaks;
+		};
+		105000000000000000000105 /* NookWeb */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NookWeb;
+		};
+		105000000000000000000106 /* NookUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NookUI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

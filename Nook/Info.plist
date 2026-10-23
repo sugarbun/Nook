@@ -6,7 +6,7 @@
 	<array>
 		<dict>
 			<key>CFBundleTypeRole</key>
-			<string>Editor</string>
+			<string>Viewer</string>
 			<key>CFBundleURLName</key>
 			<string>Web Site URL</string>
 			<key>CFBundleURLSchemes</key>
@@ -14,10 +14,27 @@
 				<string>http</string>
 				<string>https</string>
 			</array>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
 		</dict>
 	</array>
-	<key>LSHandlerRank</key>
-	<string>Owner</string>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>HTML Document</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Default</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.html</string>
+				<string>public.xhtml</string>
+				<string>public.url</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoadsInWebContent</key>
@@ -37,6 +54,8 @@
 	<false/>
 	<key>SUFeedURL</key>
 	<string>https://nook-browser.github.io/Nook/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>oWrc3J4HWz5PEVE5fIMKj5fEnCUwqYl0bO1li3xOYM4=</string>
 	<key>SUScheduledCheckInterval</key>
 	<integer>86400</integer>
 	<key>SUUpdateRelaunchDelay</key>
@@ -69,6 +88,16 @@
 					<string>application/wasm</string>
 				</array>
 			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Nook Tab Drag Item</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.nook.tab-drag-item</string>
 		</dict>
 	</array>
 </dict>

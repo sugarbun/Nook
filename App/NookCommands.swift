@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  NookCommands.swift
 //  Nook
@@ -8,20 +9,21 @@
 import AppKit
 import SwiftUI
 import WebKit
+import NookWeb
 
 struct NookCommands: Commands {
     let browserManager: BrowserManager
     let windowRegistry: WindowRegistry
     let shortcutManager: KeyboardShortcutManager
-    @Environment(\.openWindow) private var openWindow
+    let tabOrganizerManager: TabOrganizerManager
     @Environment(\.openSettings) private var openSettings
     @Environment(\.nookSettings) var nookSettings
-    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
-    init(browserManager: BrowserManager, windowRegistry: WindowRegistry, shortcutManager: KeyboardShortcutManager) {
+    init(browserManager: BrowserManager, windowRegistry: WindowRegistry, shortcutManager: KeyboardShortcutManager, tabOrganizerManager: TabOrganizerManager) {
         self.browserManager = browserManager
         self.windowRegistry = windowRegistry
         self.shortcutManager = shortcutManager
+        self.tabOrganizerManager = tabOrganizerManager
     }
 
     // MARK: - Dynamic Keyboard Shortcuts
@@ -80,18 +82,7 @@ struct NookCommands: Commands {
         CommandGroup(replacing: .newItem) {}
         CommandGroup(replacing: .windowList) {}
 
-        // App Menu Section (under Nook)
-        CommandGroup(after: .appInfo) {
-            Divider()
-            Button("Make Nook Default Browser") {
-                browserManager.setAsDefaultBrowser()
-            }
-            
-            Button("Check for Updates...") {
-                appDelegate.updaterController.checkForUpdates(nil)
-            }
-        }
-        
+        // The Settings scene supplies the standard Settings… item at ⌘,
         CommandGroup(after: .appSettings) {
             Button("Import from another Browser") {
                 browserManager.dialogManager.showDialog(
@@ -104,12 +95,39 @@ struct NookCommands: Commands {
             }
         }
 
+        // Replace the standard Quit menu item to route through showQuitDialog(),
+        // which respects the "warn before quitting" setting
+        CommandGroup(replacing: .appTermination) {
+            Button("Quit Nook") {
+                browserManager.showQuitDialog()
+            }
+            .keyboardShortcut("q", modifiers: .command)
+        }
+
+        // App Menu Section (under Nook)
+        CommandGroup(after: .appInfo) {
+            Divider()
+            Button("Make Nook Default Browser") {
+                browserManager.setAsDefaultBrowser()
+            }
+
+            Button("Check for Updates...") {
+                browserManager.appDelegate?.updaterController.checkForUpdates(nil)
+            }
+        }
+        
+
         // Edit Section
         CommandGroup(replacing: .undoRedo) {
             Button("Undo Close Tab") {
-                browserManager.undoCloseTab()
+                if let window = windowRegistry.activeWindow { browserManager.tabs.reopenLastClosed(in: window) }
             }
             .modifier(dynamicShortcut(.undoCloseTab))
+
+            Button("Reopen Closed Tab") {
+                if let window = windowRegistry.activeWindow { browserManager.tabs.reopenLastClosed(in: window) }
+            }
+            .keyboardShortcut("t", modifiers: [.command, .shift])
         }
 
         // File Section
@@ -130,17 +148,24 @@ struct NookCommands: Commands {
             
             Divider()
             Button("Open Command Bar") {
-                let currentURL = browserManager.currentTabForActiveWindow()?.url.absoluteString ?? ""
+                let currentURL = browserManager.tabs.activeWindowSession?.url.absoluteString ?? ""
                 windowRegistry.activeWindow?.commandPalette?.open(prefill: currentURL, navigateCurrentTab: true)
             }
             .modifier(dynamicShortcut(.focusAddressBar))
-            .disabled(browserManager.currentTabForActiveWindow() == nil)
+            .disabled(browserManager.tabs.activeWindowSession == nil)
 
             Button("Copy Current URL") {
                 browserManager.copyCurrentURL()
             }
             .modifier(dynamicShortcut(.copyCurrentURL))
-            .disabled(browserManager.currentTabForActiveWindow() == nil)
+            .disabled(browserManager.tabs.activeWindowSession == nil)
+
+            Divider()
+            Button("Print…") {
+                browserManager.printCurrentPage()
+            }
+            .modifier(dynamicShortcut(.printPage))
+            .disabled(browserManager.tabs.activeWindowSession == nil)
         }
 
         // Sidebar commands
@@ -157,14 +182,30 @@ struct NookCommands: Commands {
             .disabled(!nookSettings.showAIAssistant)
 
             Button("Toggle Picture in Picture") {
-                browserManager.requestPiPForCurrentTabInActiveWindow()
+                browserManager.tabs.activeWindowSession?.requestPictureInPicture()
             }
             .modifier(dynamicShortcut(.togglePictureInPicture))
             .disabled(
-                browserManager.currentTabForActiveWindow() == nil
-                    || !(browserManager.currentTabHasVideoContent()
-                        || browserManager.currentTabHasPiPActive())
+                browserManager.tabs.activeWindowSession == nil
+                    || !(browserManager.tabs.activeWindowSession.map { $0.hasVideoContent || $0.hasPiPActive } ?? false)
             )
+
+            if tabOrganizerManager.isAvailable {
+                Divider()
+
+                Button("Organize Tabs") {
+                    if let spaceID = windowRegistry.activeWindow?.spaceID {
+                        Task {
+                            await tabOrganizerManager.organizeTabs(in: spaceID, using: browserManager.tabs)
+                        }
+                    }
+                }
+                .modifier(dynamicShortcut(.organizeTabs))
+                .disabled(
+                    tabOrganizerManager.isOrganizing
+                        || windowRegistry.activeWindow?.spaceID == nil
+                )
+            }
         }
 
         // View commands
@@ -174,13 +215,13 @@ struct NookCommands: Commands {
                 browserManager.showFindBar()
             }
             .modifier(dynamicShortcut(.findInPage))
-            .disabled(browserManager.currentTabForActiveWindow() == nil)
+            .disabled(browserManager.tabs.activeWindowSession == nil)
 
             Button("Reload Page") {
-                browserManager.refreshCurrentTabInActiveWindow()
+                browserManager.tabs.activeWindowSession?.refresh()
             }
             .modifier(dynamicShortcut(.refresh))
-            .disabled(browserManager.currentTabForActiveWindow() == nil)
+            .disabled(browserManager.tabs.activeWindowSession == nil)
 
             Divider()
 
@@ -188,19 +229,19 @@ struct NookCommands: Commands {
                 browserManager.zoomInCurrentTab()
             }
             .modifier(dynamicShortcut(.zoomIn))
-            .disabled(browserManager.currentTabForActiveWindow() == nil)
+            .disabled(browserManager.tabs.activeWindowSession == nil)
 
             Button("Zoom Out") {
                 browserManager.zoomOutCurrentTab()
             }
             .modifier(dynamicShortcut(.zoomOut))
-            .disabled(browserManager.currentTabForActiveWindow() == nil)
+            .disabled(browserManager.tabs.activeWindowSession == nil)
 
             Button("Actual Size") {
                 browserManager.resetZoomCurrentTab()
             }
             .modifier(dynamicShortcut(.actualSize))
-            .disabled(browserManager.currentTabForActiveWindow() == nil)
+            .disabled(browserManager.tabs.activeWindowSession == nil)
 
             Divider()
 
@@ -208,7 +249,7 @@ struct NookCommands: Commands {
                 browserManager.hardReloadCurrentPage()
             }
             .modifier(dynamicShortcut(.hardReload))
-            .disabled(browserManager.currentTabForActiveWindow() == nil)
+            .disabled(browserManager.tabs.activeWindowSession == nil)
 
             Divider()
 
@@ -216,24 +257,17 @@ struct NookCommands: Commands {
                 browserManager.openWebInspector()
             }
             .modifier(dynamicShortcut(.openDevTools))
-            .disabled(browserManager.currentTabForActiveWindow() == nil)
+            .disabled(browserManager.tabs.activeWindowSession == nil)
 
             Divider()
 
-            Button("Force Quit App") {
-                browserManager.showQuitDialog()
-            }
-            .modifier(dynamicShortcut(.closeBrowser))
-
-            Divider()
-
-            Button(browserManager.currentTabIsMuted() ? "Unmute Audio" : "Mute Audio") {
-                browserManager.toggleMuteCurrentTabInActiveWindow()
+            Button(browserManager.tabs.activeWindowSession?.isAudioMuted == true ? "Unmute Audio" : "Mute Audio") {
+                browserManager.tabs.activeWindowSession?.toggleMute()
             }
             .modifier(dynamicShortcut(.muteUnmuteAudio))
             .disabled(
-                browserManager.currentTabForActiveWindow() == nil
-                    || !browserManager.currentTabHasAudioContent())
+                browserManager.tabs.activeWindowSession == nil
+                    || browserManager.tabs.activeWindowSession?.hasAudioContent != true)
         }
 
         Group {
@@ -242,7 +276,7 @@ struct NookCommands: Commands {
                     Button("Clear Cookies for Current Site") {
                         browserManager.clearCurrentPageCookies()
                     }
-                    .disabled(browserManager.currentTabForActiveWindow()?.url.host == nil)
+                    .disabled(browserManager.tabs.activeWindowSession?.url.host == nil)
 
                     Button("Clear Expired Cookies") {
                         browserManager.clearExpiredCookies()
@@ -269,7 +303,7 @@ struct NookCommands: Commands {
                     Button("Clear Cache for Current Site") {
                         browserManager.clearCurrentPageCache()
                     }
-                    .disabled(browserManager.currentTabForActiveWindow()?.url.host == nil)
+                    .disabled(browserManager.tabs.activeWindowSession?.url.host == nil)
 
                     Button("Clear Stale Cache") {
                         browserManager.clearStaleCache()
@@ -312,56 +346,56 @@ struct NookCommands: Commands {
 
                 Button("Clear All Website Data") {
                     Task {
-                        let dataStore = WKWebsiteDataStore.default()
+                        // Tabs use one store per space; Peek and the base config have used the default.
+                        let tabs = browserManager.tabs
+                        let dataStores: [WKWebsiteDataStore] = tabs.orderedSpaces.compactMap { tabs.profile(forSpace: $0.id)?.dataStore }
+                            + [WKWebsiteDataStore.default()]
                         let dataTypes = WKWebsiteDataStore.allWebsiteDataTypes()
-                        await dataStore.removeData(ofTypes: dataTypes, modifiedSince: Date.distantPast)
-                    }
-                }
-            }
-
-            if #available(macOS 15.5, *) {
-                CommandMenu("Extensions") {
-                    Button("Install Extension...") {
-                        browserManager.showExtensionInstallDialog()
-                    }
-                    .modifier(dynamicShortcut(.installExtension))
-
-                    Button("Manage Extensions...") {
-                        openSettings()
-                        nookSettings.currentSettingsTab = .extensions
-                    }
-
-                    Divider()
-
-                    Button("Chrome Web Store") {
-                        if let tab = browserManager.currentTabForActiveWindow() {
-                            tab.loadURL("https://chromewebstore.google.com")
+                        for dataStore in dataStores {
+                            await dataStore.removeData(ofTypes: dataTypes, modifiedSince: Date.distantPast)
                         }
                     }
-
-                    #if DEBUG
-                    Divider()
-                    Button("Open Popup Console") {
-                        browserManager.extensionManager?.showPopupConsole()
-                    }
-                    #endif
                 }
             }
 
-            CommandMenu("Appearance") {
-                Button("Customize Space Gradient...") {
-                    browserManager.showGradientEditor()
+            CommandMenu("Extensions") {
+                Button("Toggle Extension Library") {
+                    browserManager.toggleExtensionLibrary()
                 }
-                .modifier(dynamicShortcut(.customizeSpaceGradient))
-                .disabled(browserManager.tabManager.currentSpace == nil)
+                .keyboardShortcut("e", modifiers: [.command, .shift])
 
                 Divider()
 
-                Button("Create Boosts") {
-                    browserManager.showBoostsDialog()
+                Button("Install Extension...") {
+                    browserManager.showExtensionInstallDialog()
                 }
-                .modifier(dynamicShortcut(.createBoost))
-                .disabled(browserManager.currentTabForActiveWindow() == nil)
+                .modifier(dynamicShortcut(.installExtension))
+
+                Button("Manage Extensions...") {
+                    SettingsNavigation.shared.currentSettingsTab = .extensions
+                    openSettings()
+                }
+
+                Divider()
+
+                Button("Chrome Web Store") {
+                    browserManager.tabs.activeWindowSession?.load(URL(string: "https://chromewebstore.google.com")!)
+                }
+
+                #if DEBUG
+                Divider()
+                Button("Open Popup Console") {
+                    browserManager.extensionManager?.showPopupConsole()
+                }
+                #endif
+            }
+
+            CommandMenu("Appearance") {
+                Button("Space Settings...") {
+                    browserManager.showSpaceSettings()
+                }
+                .modifier(dynamicShortcut(.customizeSpaceGradient))
+                .disabled(windowRegistry.activeWindow?.spaceID == nil)
             }
         }
     }

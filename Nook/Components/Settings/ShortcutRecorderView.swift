@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  ShortcutRecorderView.swift
 //  Nook
@@ -6,7 +7,9 @@
 //
 
 import SwiftUI
+import NookDesign
 import AppKit
+import NookUI
 
 struct ShortcutRecorderView: View {
     @Binding var keyCombination: KeyCombination
@@ -22,26 +25,26 @@ struct ShortcutRecorderView: View {
     let onRecordingComplete: () -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: NookDesign.Spacing.md) {
             Button(action: toggleRecording) {
-                HStack(spacing: 4) {
+                HStack(spacing: NookDesign.Spacing.xs) {
                     Image(systemName: isRecording ? "stop.fill" : "pencil")
                     Text(isRecording ? "Recording..." : keyCombination.displayString)
-                        .font(.system(.body, design: .monospaced))
+                        .font(NookDesign.Font.body.monospaced())
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
+                .padding(.horizontal, NookDesign.Spacing.lg)
+                .padding(.vertical, NookDesign.Spacing.sm)
                 .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(isRecording ? Color.red.opacity(0.2) : Color(.controlBackgroundColor))
+                    NookDesign.Radius.shape(NookDesign.Radius.sm)
+                        .fill(isRecording ? Color.red.opacity(0.2) : NookDesign.Surface.raised)
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 6)
+                    NookDesign.Radius.shape(NookDesign.Radius.sm)
                         .stroke(hasConflict ? Color.red : Color.clear, lineWidth: 1)
                 )
             }
             .buttonStyle(.plain)
-            .onHover { isHovered in
+            .onHoverTracking { isHovered in
                 if isHovered {
                     NSCursor.pointingHand.push()
                 } else {

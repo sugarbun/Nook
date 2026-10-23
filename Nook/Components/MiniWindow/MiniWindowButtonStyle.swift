@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  MiniWindowButtonStyle.swift
 //  Nook
@@ -6,11 +7,12 @@
 //
 
 import SwiftUI
+import NookDesign
 
 struct MiniWindowPrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 12.5, weight: .semibold))
+            .font(NookDesign.Font.secondary)
             .foregroundStyle(.white)
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
@@ -20,14 +22,9 @@ struct MiniWindowPrimaryButtonStyle: ButtonStyle {
                 Capsule()
                     .stroke(Color.white.opacity(0.35), lineWidth: 1)
             )
-            .shadow(
-                color: Color.black.opacity(configuration.isPressed ? 0.1 : 0.18),
-                radius: configuration.isPressed ? 4 : 8,
-                x: 0,
-                y: configuration.isPressed ? 2 : 6
-            )
+            .nookElevation(configuration.isPressed ? .raised : .floating)
             .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .animation(NookDesign.Motion.quick, value: configuration.isPressed)
     }
 
     private func background(for isPressed: Bool) -> some View {
@@ -50,7 +47,7 @@ struct MiniWindowPrimaryButtonStyle: ButtonStyle {
 struct MiniWindowSuccessButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 12.5, weight: .semibold))
+            .font(NookDesign.Font.secondary)
             .foregroundStyle(.white)
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
@@ -60,14 +57,9 @@ struct MiniWindowSuccessButtonStyle: ButtonStyle {
                 Capsule()
                     .stroke(Color.white.opacity(0.35), lineWidth: 1)
             )
-            .shadow(
-                color: Color.black.opacity(configuration.isPressed ? 0.1 : 0.18),
-                radius: configuration.isPressed ? 4 : 8,
-                x: 0,
-                y: configuration.isPressed ? 2 : 6
-            )
+            .nookElevation(configuration.isPressed ? .raised : .floating)
             .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .animation(NookDesign.Motion.quick, value: configuration.isPressed)
     }
 
     private func background(for isPressed: Bool) -> some View {
@@ -90,7 +82,7 @@ struct MiniWindowSuccessButtonStyle: ButtonStyle {
 struct MiniWindowErrorButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 12.5, weight: .semibold))
+            .font(NookDesign.Font.secondary)
             .foregroundStyle(.white)
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
@@ -100,14 +92,9 @@ struct MiniWindowErrorButtonStyle: ButtonStyle {
                 Capsule()
                     .stroke(Color.white.opacity(0.35), lineWidth: 1)
             )
-            .shadow(
-                color: Color.black.opacity(configuration.isPressed ? 0.1 : 0.18),
-                radius: configuration.isPressed ? 4 : 8,
-                x: 0,
-                y: configuration.isPressed ? 2 : 6
-            )
+            .nookElevation(configuration.isPressed ? .raised : .floating)
             .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .animation(NookDesign.Motion.quick, value: configuration.isPressed)
     }
 
     private func background(for isPressed: Bool) -> some View {

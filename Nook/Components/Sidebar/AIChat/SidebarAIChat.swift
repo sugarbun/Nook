@@ -1,3 +1,4 @@
+// Licensed under GPL-3.0. See LICENSE.
 //
 //  SidebarAIChat.swift
 //  Nook
@@ -7,6 +8,9 @@
 
 import SwiftUI
 import AppKit
+import NookDesign
+import NookWeb
+import NookUI
 
 struct ChatMessage: Identifiable, Equatable {
     let id = UUID()
@@ -23,7 +27,7 @@ struct ChatMessage: Identifiable, Equatable {
 }
 
 struct URLCitation: Identifiable, Equatable, Codable {
-    let id = UUID()
+    var id = UUID()
     let url: String
     let title: String?
     let content: String?
@@ -55,6 +59,8 @@ struct SidebarAIChat: View {
     @State private var newModelId: String = ""
     @FocusState private var isTextFieldFocused: Bool
 
+    private let streamingBubbleID = "streaming"
+
     var body: some View {
         VStack(spacing: 0) {
             // Messages area
@@ -73,11 +79,19 @@ struct SidebarAIChat: View {
                         }
 
                         if aiService.isLoading {
-                            loadingView
+                            if aiService.streamingText.isEmpty {
+                                loadingView
+                            } else {
+                                MessageBubble(message: ChatMessage(role: .assistant, content: aiService.streamingText, timestamp: .now))
+                                    .id(streamingBubbleID)
+                            }
                         }
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
+                }
+                .onChange(of: aiService.streamingText) {
+                    proxy.scrollTo(streamingBubbleID, anchor: .bottom)
                 }
                 .onChange(of: aiService.messages.count) { _, _ in
                     if let last = aiService.messages.last {
@@ -125,37 +139,31 @@ struct SidebarAIChat: View {
     private var headerView: some View {
         HStack(spacing: 8) {
             Button("Close", systemImage: "xmark") {
-                withAnimation(.easeInOut(duration: 0.2)) {
+                withAnimation(NookDesign.Motion.standard) {
                     windowState.isSidebarAIChatVisible = false
                 }
             }
-            .labelStyle(.iconOnly)
-            .buttonStyle(NavButtonStyle())
-            .foregroundStyle(Color.primary)
+            .nookIconButtons()
 
             if !aiService.messages.isEmpty {
                 Text("Ask Nook")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .transition(.blur.animation(.smooth))
+                    .font(NookDesign.Font.title)
+                    .foregroundStyle(.primary)
+                    .transition(.blur.animation(NookDesign.Motion.standard))
             }
 
             Spacer()
 
-            Button("Settings", systemImage: "gearshape") {
-                showSettingsDialog()
+            HStack(spacing: NookDesign.Spacing.xxs) {
+                Button("Settings", systemImage: "gearshape") {
+                    showSettings()
+                }
+                Button("Clear Messages", systemImage: "trash") {
+                    showClearMessagesDialog()
+                }
+                .disabled(aiService.messages.isEmpty)
             }
-            .labelStyle(.iconOnly)
-            .buttonStyle(NavButtonStyle())
-            .foregroundStyle(Color.primary)
-
-            Button("Clear Messages", systemImage: "trash") {
-                showClearMessagesDialog()
-            }
-            .labelStyle(.iconOnly)
-            .buttonStyle(NavButtonStyle())
-            .foregroundStyle(Color.primary)
-            .disabled(aiService.messages.isEmpty)
+            .nookIconButtons()
         }
         .padding(.horizontal, 8)
     }
@@ -166,8 +174,8 @@ struct SidebarAIChat: View {
         VStack(spacing: 8) {
             TextField("Ask about this page...", text: $messageText, axis: .vertical)
                 .textFieldStyle(.plain)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundColor(.white.opacity(0.9))
+                .font(NookDesign.Font.body)
+                .foregroundStyle(.primary)
                 .lineLimit(1...4)
                 .focused($isTextFieldFocused)
                 .onSubmit { sendMessage() }
@@ -186,8 +194,8 @@ struct SidebarAIChat: View {
 
                 Button(action: sendMessage) {
                     Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 24))
-                        .foregroundStyle(messageText.isEmpty ? .white.opacity(0.3) : .white.opacity(0.9))
+                        .font(NookDesign.Font.titleLarge)
+                        .foregroundStyle(messageText.isEmpty ? HierarchicalShapeStyle.tertiary : .primary)
                 }
                 .buttonStyle(.plain)
                 .disabled(messageText.isEmpty || aiService.isLoading || !aiService.hasApiKey)
@@ -195,8 +203,7 @@ struct SidebarAIChat: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(.ultraThinMaterial)
-        .clipShape(.rect(cornerRadius: 12))
+        .nookControlSurface(in: NookDesign.Radius.shape(NookDesign.Radius.lg))
         .padding(.horizontal, 8)
     }
 
@@ -238,21 +245,26 @@ struct SidebarAIChat: View {
 
             Divider()
 
-            Button(action: { showAddModelPopover = true }) {
-                Label("Add Model...", systemImage: "plus.circle")
+            if configService.activeProviderType != .appleIntelligence {
+                Button(action: { showAddModelPopover = true }) {
+                    Label("Add Model...", systemImage: "plus.circle")
+                }
             }
 
-            Button(action: { showSettingsDialog() }) {
+            Button(action: { showSettings() }) {
                 Label("Manage Models...", systemImage: "gearshape")
             }
         }
+        .menuStyle(.button)
+        .buttonStyle(RectNavButtonStyle())
+        .controlSize(.small)
         .popover(isPresented: $showAddModelPopover, arrowEdge: .top) {
             VStack(spacing: 8) {
                 Text("Add Model by ID")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(NookDesign.Font.secondary)
                 TextField("Model ID (e.g. gpt-4o)", text: $newModelId)
                     .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 12))
+                    .font(NookDesign.Font.secondary)
                     .frame(width: 200)
                 HStack {
                     Button("Cancel") {
@@ -280,24 +292,17 @@ struct SidebarAIChat: View {
 
     private var webSearchToggle: some View {
         Button(action: {
-            withAnimation(.easeInOut(duration: 0.2)) {
+            withAnimation(NookDesign.Motion.standard) {
                 var config = configService.generationConfig
                 config.webSearchEnabled.toggle()
                 configService.generationConfig = config
             }
         }) {
             Image(systemName: configService.generationConfig.webSearchEnabled ? "globe.americas.fill" : "globe")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(configService.generationConfig.webSearchEnabled ? .green : .white.opacity(0.5))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(configService.generationConfig.webSearchEnabled ? .green.opacity(0.15) : .white.opacity(0.08))
-                )
+                .foregroundStyle(configService.generationConfig.webSearchEnabled ? AnyShapeStyle(.green) : AnyShapeStyle(.secondary))
         }
-        .buttonStyle(.plain)
-        .frame(height: 28)
-        .frame(width: 36)
+        .buttonStyle(NookIconButtonStyle())
+        .help(configService.generationConfig.webSearchEnabled ? "Web Search On" : "Web Search Off")
     }
 
     // MARK: - Empty/Loading States
@@ -305,28 +310,21 @@ struct SidebarAIChat: View {
     private var apiKeyRequiredView: some View {
         VStack(spacing: 12) {
             Image(systemName: "key.fill")
-                .font(.system(size: 32))
-                .foregroundStyle(.white.opacity(0.3))
+                .font(NookDesign.Font.display)
+                .foregroundStyle(.tertiary)
 
             Text("API Key Required")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.8))
+                .font(NookDesign.Font.label)
+                .foregroundStyle(.primary)
 
             Text("Add your API key to start chatting")
-                .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.6))
+                .font(NookDesign.Font.secondary)
+                .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
-            Button(action: { showSettingsDialog() }) {
-                Text("Add API Key")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.black)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(.white.opacity(0.9))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-            }
-            .buttonStyle(.plain)
+            Button("Add API Key") { showSettings() }
+                .font(NookDesign.Font.secondary)
+                .buttonStyle(RectNavButtonStyle())
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.top, 60)
@@ -338,37 +336,37 @@ struct SidebarAIChat: View {
             let supportsWebSearch = configService.activeProviderType == .openRouter || configService.activeProviderType == .gemini
 
             Image(systemName: webSearchEnabled && supportsWebSearch ? "globe" : "sparkle")
-                .font(.system(size: 32))
-                .foregroundStyle(webSearchEnabled && supportsWebSearch ? .green.opacity(0.6) : .white.opacity(0.3))
+                .font(NookDesign.Font.display)
+                .foregroundStyle(webSearchEnabled && supportsWebSearch ? AnyShapeStyle(.green.opacity(0.6)) : AnyShapeStyle(.tertiary))
 
             Text("Ask Nook")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.8))
+                .font(NookDesign.Font.label)
+                .foregroundStyle(.primary)
 
             if webSearchEnabled && supportsWebSearch {
                 VStack(spacing: 6) {
                     Text("Questions about this page, or just curious? I'm here.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.6))
+                        .font(NookDesign.Font.secondary)
+                        .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
 
                     HStack(spacing: 4) {
                         Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 10))
+                            .font(NookDesign.Font.caption)
                             .foregroundStyle(.green.opacity(0.7))
                         Text("Web search enabled")
-                            .font(.system(size: 11, weight: .medium))
+                            .font(NookDesign.Font.caption)
                             .foregroundStyle(.green.opacity(0.7))
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
                     .background(.green.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .clipShape(NookDesign.Radius.shape(NookDesign.Radius.sm))
                 }
             } else {
                 Text("Questions about this page, or just curious? I'm here.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .font(NookDesign.Font.secondary)
+                    .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
         }
@@ -383,17 +381,17 @@ struct SidebarAIChat: View {
             VStack(alignment: .leading, spacing: 2) {
                 if let toolName = aiService.currentToolName {
                     Text("Using \(toolName)...")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(NookDesign.Font.secondary)
                         .foregroundStyle(.purple.opacity(0.8))
                 } else {
                     Text("Thinking...")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .font(NookDesign.Font.secondary)
+                        .foregroundStyle(.secondary)
                 }
                 if configService.generationConfig.webSearchEnabled && !aiService.isExecutingTools {
                     Text("Searching the web...")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.white.opacity(0.4))
+                        .font(NookDesign.Font.caption)
+                        .foregroundStyle(.tertiary)
                 }
             }
         }
@@ -412,9 +410,8 @@ struct SidebarAIChat: View {
         }
     }
 
-    private func showSettingsDialog() {
-        // Open the settings window to the AI tab
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+    private func showSettings() {
+        browserManager.openSettings(tab: .ai)
     }
 
     private func showClearMessagesDialog() {
@@ -445,7 +442,7 @@ struct SidebarAIChat: View {
                                 iconName: "trash",
                                 variant: .primary,
                                 action: {
-                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                    withAnimation(NookDesign.Motion.standard) {
                                         aiService.clearMessages()
                                     }
                                     browserManager.dialogManager.closeDialog()
@@ -463,10 +460,17 @@ struct SidebarAIChat: View {
 
 struct MessageBubble: View {
     let message: ChatMessage
+    @EnvironmentObject var gradientColorManager: GradientColorManager
+    @Environment(BrowserWindowState.self) private var windowState
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.openURL) var openURL
     @State private var isHovered: Bool = false
     @State private var showCopied: Bool = false
+
+    /// The person's own messages carry the space's accent; private windows keep the neutral one.
+    private var accent: Color {
+        windowState.isIncognito ? SpaceGradient.incognito.primaryColor : gradientColorManager.accentColor
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -480,19 +484,19 @@ struct MessageBubble: View {
                         if message.usedWebSearch {
                             HStack(spacing: 4) {
                                 Image(systemName: "globe")
-                                    .font(.system(size: 10, weight: .medium))
+                                    .font(NookDesign.Font.caption)
                                 Text("Web Search")
-                                    .font(.system(size: 10, weight: .medium))
+                                    .font(NookDesign.Font.caption)
                                 if !message.citations.isEmpty {
                                     Text("• \(message.citations.count) \(message.citations.count == 1 ? "source" : "sources")")
-                                        .font(.system(size: 9, weight: .regular))
+                                        .font(NookDesign.Font.caption)
                                 }
                             }
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(.secondary)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
                             .background(.green.opacity(0.15))
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                            .clipShape(NookDesign.Radius.shape(NookDesign.Radius.sm))
                             .padding(.horizontal, 12)
                             .padding(.top, 10)
                             .padding(.bottom, 6)
@@ -515,8 +519,8 @@ struct MessageBubble: View {
                                     .padding(.horizontal, 12)
 
                                 Text("Sources")
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundStyle(.white.opacity(0.5))
+                                    .font(NookDesign.Font.caption)
+                                    .foregroundStyle(.secondary)
                                     .padding(.horizontal, 12)
 
                                 VStack(spacing: 4) {
@@ -529,10 +533,7 @@ struct MessageBubble: View {
                             .padding(.bottom, 10)
                         }
                     }
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(.white.opacity(0.12))
-                    )
+                    .nookControlSurface(in: NookDesign.Radius.shape(NookDesign.Radius.lg))
                     .overlay(alignment: .topTrailing) {
                         if isHovered {
                             Button(action: {
@@ -544,16 +545,17 @@ struct MessageBubble: View {
                                 }
                             }) {
                                 Image(systemName: showCopied ? "checkmark" : "doc.on.doc")
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundStyle(.white.opacity(0.8))
+                                    .font(NookDesign.Font.caption)
+                                    .foregroundStyle(.secondary)
                                     .frame(width: 28, height: 28)
+                                    // Raised so it stands off the bubble's fill
                                     .background(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .fill(.black.opacity(0.5))
+                                        NookDesign.Radius.shape(NookDesign.Radius.md)
+                                            .fill(NookDesign.Surface.raised)
                                     )
                                     .overlay(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .stroke(.white.opacity(0.15), lineWidth: 1)
+                                        NookDesign.Radius.shape(NookDesign.Radius.md)
+                                            .strokeBorder(NookDesign.Surface.hairline, lineWidth: NookDesign.Size.hairlineWidth)
                                     )
                             }
                             .buttonStyle(.plain)
@@ -563,15 +565,12 @@ struct MessageBubble: View {
                     }
                 } else {
                     Text(message.content)
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundStyle(.black)
+                        .font(NookDesign.Font.bodyRegular)
+                        .foregroundStyle(.primary)
                         .textSelection(.enabled)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(.white.opacity(0.9))
-                        )
+                        .nookControlSurface(tint: accent, in: NookDesign.Radius.shape(NookDesign.Radius.lg))
                 }
             }
 
@@ -579,8 +578,8 @@ struct MessageBubble: View {
                 Spacer(minLength: 40)
             }
         }
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.15)) {
+        .onHoverTracking { hovering in
+            withAnimation(NookDesign.Motion.quick) {
                 isHovered = hovering
             }
         }
@@ -645,29 +644,29 @@ struct MessageBubble: View {
 
         return Text(parseInlineMarkdown(text))
             .font(.system(size: fontSize, weight: weight))
-            .foregroundStyle(.white.opacity(0.95))
+            .foregroundStyle(.primary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 2)
     }
 
     private func paragraphView(_ text: String) -> some View {
         Text(parseInlineMarkdown(text))
-            .font(.system(size: 13, weight: .regular))
+            .font(NookDesign.Font.bodyRegular)
             .lineSpacing(4)
-            .foregroundStyle(.white.opacity(0.9))
+            .foregroundStyle(.primary)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func bulletView(_ text: String) -> some View {
         HStack(alignment: .top, spacing: 6) {
             Text("•")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.white.opacity(0.7))
+                .font(NookDesign.Font.body)
+                .foregroundStyle(.secondary)
                 .padding(.top, 1)
             Text(parseInlineMarkdown(text))
-                .font(.system(size: 13, weight: .regular))
+                .font(NookDesign.Font.bodyRegular)
                 .lineSpacing(4)
-                .foregroundStyle(.white.opacity(0.9))
+                .foregroundStyle(.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -675,13 +674,13 @@ struct MessageBubble: View {
     private func numberedView(_ text: String) -> some View {
         HStack(alignment: .top, spacing: 6) {
             Text("•")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.white.opacity(0.7))
+                .font(NookDesign.Font.body)
+                .foregroundStyle(.secondary)
                 .padding(.top, 1)
             Text(parseInlineMarkdown(text))
-                .font(.system(size: 13, weight: .regular))
+                .font(NookDesign.Font.bodyRegular)
                 .lineSpacing(4)
-                .foregroundStyle(.white.opacity(0.9))
+                .foregroundStyle(.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -690,28 +689,26 @@ struct MessageBubble: View {
         VStack(alignment: .leading, spacing: 4) {
             if !language.isEmpty {
                 Text(language)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .font(NookDesign.Font.caption)
+                    .foregroundStyle(.secondary)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 2)
-                    .background(.white.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .background(NookDesign.Surface.fill)
+                    .clipShape(NookDesign.Radius.shape(NookDesign.Radius.xs))
             }
             Text(code)
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.9))
+                .font(NookDesign.Font.secondary.monospaced())
+                .foregroundStyle(.primary)
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.black.opacity(0.3))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .background(NookDesign.Surface.fillPressed)
+                .clipShape(NookDesign.Radius.shape(NookDesign.Radius.md))
         }
     }
 
     private func parseInlineMarkdown(_ text: String) -> AttributedString {
         do {
-            var attributed = try AttributedString(markdown: text, options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace))
-            attributed.foregroundColor = .white.opacity(0.9)
-            return attributed
+            return try AttributedString(markdown: text, options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace))
         } catch {
             return AttributedString(text)
         }
@@ -733,19 +730,19 @@ struct CitationView: View {
         }) {
             HStack(spacing: 6) {
                 Image(systemName: "link")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .font(NookDesign.Font.caption)
+                    .foregroundStyle(.tertiary)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(citation.domain)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(isHovered ? 0.9 : 0.7))
+                        .font(NookDesign.Font.caption)
+                        .foregroundStyle(isHovered ? .primary : .secondary)
                         .lineLimit(1)
 
                     if let title = citation.title, !title.isEmpty {
                         Text(title)
-                            .font(.system(size: 10, weight: .regular))
-                            .foregroundStyle(.white.opacity(0.5))
+                            .font(NookDesign.Font.caption)
+                            .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
                 }
@@ -753,23 +750,23 @@ struct CitationView: View {
                 Spacer()
 
                 Image(systemName: "arrow.up.forward")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(.white.opacity(isHovered ? 0.6 : 0.4))
+                    .font(NookDesign.Font.caption)
+                    .foregroundStyle(isHovered ? .secondary : .tertiary)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
             .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(.white.opacity(isHovered ? 0.12 : 0.08))
+                NookDesign.Radius.shape(NookDesign.Radius.sm)
+                    .fill(isHovered ? NookDesign.Surface.fillPressed : NookDesign.Surface.fill)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(.white.opacity(isHovered ? 0.2 : 0.0), lineWidth: 1)
+                NookDesign.Radius.shape(NookDesign.Radius.sm)
+                    .stroke(isHovered ? NookDesign.Surface.hairline : .clear, lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.15)) {
+        .onHoverTracking { hovering in
+            withAnimation(NookDesign.Motion.quick) {
                 isHovered = hovering
             }
         }
